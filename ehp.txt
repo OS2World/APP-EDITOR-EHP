@@ -1,0 +1,53 @@
+The EHP editor is an editor written on a HP UNIX workstation.
+It has been ported to OS/2 2.x and I might call this release 1.3.
+The version (except the regular expression pattern matching module)
+should also be compilable with DOS.
+
+EHP is public domain. Nevertheless note, that a small part (namely the 
+regular expression module) is taken from the FSF. So regard their 
+copyrights when altering or copying EHP.
+
+The package can be compiled using EMX GCC 0.8e or greater. 
+Unpack the file using unzip utility. Construct a suitable keyboard
+layout using the extracted program km.exe or use the withcoming tasten.inf. 
+Enter the path where you stored tasten.inf in the definition of you EHPINIT 
+environment variable.
+
+Install procedure:
+Copy the .exe files and the tasten.inf file
+to a directory of your choice (best one contained in your PATH)
+and set the environment variable EHPINIT to something like
+  set EHPINIT=autoind screen 80x50 keys xxx\tasten.inf
+where xxx represents the path where you put the tasten.inf file.
+If you don't have installed emx, you have to copy the .DLL-files to 
+a directory contained in your LIBPATH statement, e.g. to \OS2\DLL.
+
+Changes of version 1.3 compared with release 1.2:
+- A bug in deleting a rectangular block has been fixed. When such a block
+  ended in the last line of the file, then deleting it hung EHP in an
+  endless loop.
+- Indenting a block, of which the end is in the first column of a line
+  will not move the block end any more. This makes correction the
+  indentation easier.
+- Cursor left at beginning of line will move cursor to end of previous line
+- When searching for the n-th occurrence of a target or replacing a
+  target a number of times, a good speedup was achieved by deferring
+  screen output until the wanted occurrence has been found, respectively
+  the target was replaces the specified number of times.
+
+Known bugs:
+- If the confirmation coming up when leaving EHP by a keyboard command is
+  answered with the mouse, EHP intermittently gets blocked. Terminate it 
+  using CTRL-c. In some cases, the security check is answered 'automatically'
+  due to a phantom mouse event (at least on my machine). It's not that
+  fine, since this should be a security check. If I get the time, I'll
+  try to fix it.
+
+Things on my TO DO list:
+... lots and lots, but from who I can steal the time?
+
+Please report bugs, hints, statements, comments and other feedback to me via
+e-Mail to auhl@fzi.de ! I'm lucky to hear about everyone using EHP.
+
+Enjoy,
+Axel (auhl@fzi.de)
