@@ -42,7 +42,8 @@
 #include "curses.h"
 #include <stdarg.h>
 
-void waddch (WINDOW*, short int), wdelch (WINDOW*);
+void waddch (WINDOW*, short int);
+void wdelch (WINDOW*);
 
 extern char buffer[],*p_in,*p_out;
 extern short int *cur_to_poi();
@@ -256,9 +257,7 @@ char c;
 *
 ******************************************************************************/
 
-void waddch(w,c)
-WINDOW *w;
-short int c;
+void waddch(WINDOW *w, short int c)
 {
   if(!do_special(w,c & 255)) /* Testen, ob Zeichen ein Sonderzeichen war */
   {

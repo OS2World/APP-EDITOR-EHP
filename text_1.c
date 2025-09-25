@@ -14,9 +14,9 @@
 /*              - left (ein zeichen nach links)                 */
 /*              - wortende (testen, ob zeichen worttrenner)     */
 /*              - word_left (ein wort links)                    */
-/*              - word_right (ein wort rechts)                  */
 /*              - bol (an zeilenanfang)                         */
 /*              - eol (an zeilenende)                           */
+/*              - word_right (ein wort rechts)                  */
 /*              - check_underl (teste auf _^H)                  */
 /*              - delete (aktuelles zeichen loeschen)           */
 /*              - mdelete (mehrere Zeichen loeschen)            */
@@ -69,7 +69,7 @@ void copy_to_buff()
 
   /* Rest des Puffers mit Blanks auffuellen */
   for (i=strlen (linebuff);i<3*MAXLENGTH;linebuff[i++] = ' ');
-  linebuff [3*MAXLENGTH] = '\0';
+  linebuff [3*MAXLENGTH] = '\0';/* Puffer ist mit '\0' terminiert */
   i = akt_winp->screencol;      /* bildschirmpos. speichern */
 
   /* Jetzt textcol setzen. Dazu screencol mal right aufrufen */
@@ -288,9 +288,11 @@ char c;
 *
 * FUNKTION:     word_left()     (ein wort links)
 * ERGEBNIS:     TRUE,FALSE
-* BESCHREIBUNG: - leading spaces und tabs werden uebersprungen
+* BESCHREIBUNG: - Aufeinanderfolgende Worttrenner auáer Whitespaces
+*                 werden als Wort angesehen.
+*               - Whitespaces links von Cursor werden uebersprungen
 *               - anschliessend werden screencol und textcol auf
-*               den beginn des naechsten wortes gesetzt
+*                 den beginn des naechsten wortes gesetzt
 *****************************************************************/
 
 int word_left()
@@ -298,49 +300,19 @@ int word_left()
   /* *** interne Daten und Initialisierung *** */
   register int old_sc = akt_winp->screencol, /* Zwischenspeicher Spalte */
 	       ging=FALSE;           /* Rueckgabewert der Funktion left */
+	   char c,                   /* aktuelles Zeichen               */
+		sep_word;            /* Wort besteht aus Worttrennern   */
 
-  while (left() && ((akt_zeichen() == ' ') || (akt_zeichen() == '\t')));
-  while (!wortende(akt_zeichen()) && (ging=left()));
+  /* Zuerst Leerzeichen links vom Cursor ueberspringen */
+  while (left() && ((c = akt_zeichen()) == ' ' || c == '\t'));
+  sep_word = wortende(c);
+  while ((sep_word ? wortende (c=akt_zeichen()) && c != ' ' && c != '\t'
+		   : !wortende(akt_zeichen()))
+	 && (ging=left()));
   if (ging)  /* Wenn man vor den Wortanfang gehen konnte, dann wieder */
     right(); /* eins nach rechts auf den Wortanfang. */
   if(old_sc == akt_winp->screencol) /* Cursorspalte restaurieren */
     return(FALSE);
-  return(TRUE);
-}
-
-
-/****************************************************************
-*
-* FUNKTION:     word_right()    (ein wort rechts)
-* ERGEBNIS:     TRUE,FALSE
-* BESCHREIBUNG: - es wird bis zum wortende gesprungen
-*               - folgende spaces oder tabs werden ebenfalls
-*               uebersprungen
-*****************************************************************/
-
-int word_right()
-{
-  /* *** interne Daten *** */
-  register int  old_sc, /* Zwischenspeicher Cursorspalte */
-		old_tc; /* Zwischenspeicher Cursorzeile  */
-  register char az;     /* aktuelles Zeichen             */
-
-  fill_buff(); /* evtl. aktuelle Zeile in Puffer kopieren */
-  old_sc = akt_winp->screencol; /* Cursorposition merken */
-  old_tc = akt_winp->textcol;
-  if(wortende(akt_zeichen())) /* Steht man auf Worttrenner, */
-    right();                  /* dann eins nach rechts      */
-  else                        /* sonst Wort skippen         */
-    while ((az=akt_zeichen()) && !wortende (az) && right());
-  /* Jetzt die dem Wort folgenden Blanks und Tabs skippen */
-  while ((((az=akt_zeichen()) == ' ') || (az == '\t')) && right());
-
-  if(akt_winp->screencol == MAXLENGTH) /* steht man am rechten */
-  { /* Rand, dann wieder zur alten Position zurueck */
-    akt_winp->screencol = old_sc;
-    akt_winp->textcol = old_tc;
-    return(FALSE);
-  }
   return(TRUE);
 }
 
@@ -378,6 +350,51 @@ void eol()
   bol();  /* vom Anfang der Zeile so oft nach rechts, bis Cursor in */
   while (akt_winp->textcol < i) /* richtiger interner Spalte steht. */
     right();              /* Dadurch hat textcol den richtigen Wert */
+}
+
+/****************************************************************
+*
+* FUNKTION:     word_right()    (ein wort rechts)
+* ERGEBNIS:     TRUE,FALSE
+* BESCHREIBUNG: - es wird bis zum wortende gesprungen
+*               - ist aktuelles Zeichen ein Worttrenner, so wird
+*                 bis zum ersten nicht-Worttrenner gesprungen.
+*               - folgende spaces oder tabs werden ebenfalls
+*                 uebersprungen
+*               - Beachte: Es darf nie nach links gesprungen werden
+*                 (Abh„ngigkeit zu do_tab())
+*****************************************************************/
+
+int word_right()
+{
+  /* *** interne Daten *** */
+  register int  old_sc,   /* Zwischenspeicher Cursorspalte auf Biildschirm */
+		old_tc;   /* Zwischenspeicher Cursorspalte intern          */
+  register char az,       /* aktuelles Zeichen               */
+		sep_word; /* Besteht Wort aus Worttrennern ? */
+
+  fill_buff(); /* evtl. aktuelle Zeile in Puffer kopieren */
+  old_sc = akt_winp->screencol; /* Cursorposition merken */
+  old_tc = akt_winp->textcol;
+  sep_word = wortende (akt_zeichen()); /* Steht man auf Worttrenner? */
+  while ((az=akt_zeichen())
+	&& (sep_word ? wortende (az) && az != ' ' && az != '\t'
+		     : !wortende (az)) && right());
+  /* Jetzt die dem Wort folgenden Blanks und Tabs skippen */
+  while ((((az=akt_zeichen()) == ' ') || (az == '\t')) && right());
+
+  if(akt_winp->screencol == MAXLENGTH) /* steht man am rechten */
+  { /* Rand, dann gehe zum eigentlichen Zeilenende. */
+    eol();
+    if (akt_winp->screencol < old_sc) 
+    {  /* es darf nie nach links gegangen werden ! */
+       akt_winp->screencol = old_sc;
+       akt_winp->textcol   = old_tc;
+    }
+    return (akt_winp->screencol != old_sc); /* Hat man sich bewegt? */
+  }
+  else 
+    return(TRUE);
 }
 
 
@@ -449,7 +466,8 @@ int delete()
     fwdcpy(out,in); /* Alles rechts vom Cursor eins ranziehen */
     check_underl(); /* Ist dadurch ein neues unterstrichenes Zeichen entstd., */
 		    /* wird alles korrekt angepasst */
-    /* Ende des Zeilenpuffers mit Blanks besetzen */
+    /* Ende des Zeilenpuffers mit Blanks besetzen, Abschluánull bleibt
+       erhalten */
     strncpy(&linebuff[3*MAXLENGTH-anz_del],"   ",anz_del);
     akt_winp->changeflag = TRUE; /* Text als geaendert markieren */
     return(TRUE);
@@ -529,6 +547,9 @@ int backspace()
 * BESCHREIBUNG: - das aktuelle zeichen wird deletet
 *               - solange, wie das aktuelle zeichen kein wort-
 *               trenner ist, wird es geloescht
+               - Ausnahme: Das aktuelle Word begann mit einem
+*                 Worttrenner. In diesem Fall wird bis zum ersten
+*                 Leerzeichen oder nicht-Worttrenner geloescht.
 *               - folgende spaces und tabs werden ebenfalls ge-
 *               loescht
 *               - Durch die Verwendung von delete() werden die
@@ -538,39 +559,22 @@ int backspace()
 int delete_word()
 {
   /* *** interne Daten *** */
-  register int  max_del; /* maximal zu loeschende Tabs und Blanks */
   int           old_sc,  /* Alte Cursorposition Spalte            */
 		old_tc;  /* Alte Cursorposition Spalte intern     */
-  register char az;      /* Aktuelles Zeichen                     */
 
-  /* Steht man auf einem Worttrenner, dann nur diesen loeschen */
-  if(wortende(az = akt_zeichen()) && az != ' ')
-    if (delete())
-      return(TRUE);
-    else   /* klappte das Loeschen nicht, False zurueckgeben */
-      return (FALSE);
-
+  fill_buff();
   old_sc = akt_winp->screencol; /* Cursorspalte merken */
   old_tc = akt_winp->textcol;
 
-  /* Alle Zeichen bis zum naechsten Worttrenner skippen */
-  while ((az=akt_zeichen()) && !wortende(az))
-    right();
-
-  swap_int(&old_sc,&akt_winp->screencol); /* Zur Anfangsposition zurueck */
-  akt_winp->textcol = old_tc;
-  mdelete(old_sc - akt_winp->screencol);  /* geskippte Zeichen loeschen */
-  max_del = MAXLENGTH - akt_winp->screencol;
-  old_sc = akt_winp->screencol;  /* Cursorspalte merken */
-  old_tc = akt_winp->textcol;
-
-  /* Die dem Wort folgenden Blanks und Tabs werden auch geloescht */
-  while (max_del-- && ((az=akt_zeichen()) == ' ' || az == '\t'))
-    right();
-  swap_int(&old_sc,&akt_winp->screencol);
-  akt_winp->textcol = old_tc;
-  mdelete(old_sc - akt_winp->screencol);
-  return(TRUE);
+  /* Alle Zeichen bis zum naechsten Wort skippen */
+  if (word_right())
+  {
+    swap_int(&old_sc,&akt_winp->screencol); /* Zur Anfangsposition zurueck */
+    akt_winp->textcol = old_tc;
+    mdelete(old_sc - akt_winp->screencol);  /* geskippte Zeichen loeschen */
+    return TRUE;
+  }
+  return FALSE;
 }
 
 /****************************************************************
@@ -645,9 +649,9 @@ int delete_eol()
 *  Beschreibung : Die nachfolgende Zeile wird an die aktuelle Zeile angehaengt.
 *                 Wird die Zeile dadurch zu lang oder existiert keine nach-
 *                 folgende Zeile, so wird der entsprechende Fehlerwert zu-
-*                 rueckgegeben.
+*                 rueckgegeben. Die Cursorposition bleibt unver„ndert.
 *
-*****************************************************************************/
+*****************************************************************************/ 
 
 int join(modus)
 int modus;

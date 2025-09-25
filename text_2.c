@@ -30,11 +30,16 @@
 /*              - free_text (Text freigeben)                    */
 /*              - save_delline (aktuelle zeile sichern)         */
 /*              - rest_delline (gespeicherte Zeile einfuegen)   */
+/*              - reflow_paragraph (Absatz neu ausrichten)      */
 /****************************************************************/
 
+#include <io.h>          /* FÅr den Aufruf von fstat() in */
+#include <sys/types.h>   /* der Routine copy_file         */
+#include <sys/utime.h>   /* FÅr den Aufruf von utime()    */
 #include "defs.h"
 
 extern char backupflag;
+extern char clear_buff;
 extern marker_typ marker[];
 
 /* *** globale Daten und Initialisierung *** */
@@ -250,6 +255,16 @@ register int n;
 * FUNKTION:     enter_char()    (zeichen an aktuelle pos kopieren)
 *
 * PARAMETER:    char c: einzufuegendes zeichen
+*               char *scrolled: Wird auf TRUE gesetzt, wenn
+*                               horizontal gescrollt wurde und der
+*                               Pointer nicht NULL ist.
+*                               Wenn nicht gescrollt wurde, bleibt
+*                               es unverÑndert.
+*               int ins_put:    Modus, wie bei der Anzeige verfahren
+*                               werden soll: INSERT bedeutet einfÅgen
+*                               PUT bedeutet Åberschreiben.
+*               char linebreak: TRUE: nicht seitlich scrollen, sondern
+*                               nur *scrolled entsprechend setzen
 * ERGEBNIS:     TRUE/FALSE
 * BESCHREIBUNG: - das zeichen c wird an die aktuelle position ko-
 *               piert
@@ -258,8 +273,11 @@ register int n;
 *               Bildschirm gescrollt
 *****************************************************************/
 
-int enter_char(c)
+int enter_char(c, scrolled, ins_put, linebreak)
 register char c;
+char *scrolled;
+int ins_put;
+char linebreak;
 {
   /* *** interne Daten und Initialisierung *** */
   register int cu_ret = FALSE; /* Rueckgabewert der check_underl()-Funktion */
@@ -283,12 +301,23 @@ register char c;
     { /* Testen, ob horizontal gescrollt werden muss */
       /* Wenn ja, dann normal die voreingestellte Weite. Sollte diese */
       /* groesser als die Fensterbreite sein, dann 1/4 Fensterbreite  */
-      akt_winp->ws_col += EC_SCROLL_WIDTH < akt_winp->dx ?
-			  EC_SCROLL_WIDTH : akt_winp->dx / 4 + 1;
-      if(akt_winp->ws_col >= MAXLENGTH) /* Zu weit, dann eins zurueck */
-	akt_winp->ws_col = MAXLENGTH-1;
-      show_win(W_AKT);  /* Fensterinhalt neu anzeigen */
-      fill_buff(); /* aktuelle Zeile wieder in Puffer kopieren */
+      if (scrolled)
+	*scrolled = TRUE;
+      if (!linebreak)
+      {
+	akt_winp->ws_col += EC_SCROLL_WIDTH < akt_winp->dx ?
+			    EC_SCROLL_WIDTH : akt_winp->dx / 4 + 1;
+	if(akt_winp->ws_col >= MAXLENGTH) /* Zu weit, dann eins zurueck */
+	  akt_winp->ws_col = MAXLENGTH-1;
+	show_win(W_AKT);  /* Fensterinhalt neu anzeigen */
+	fill_buff(); /* aktuelle Zeile wieder in Puffer kopieren */
+      }
+      else  /* letztes Zeichen in alter Zeile anzeigen (wichtig, falls */
+	    /* Overwrite-Modus aktiv) !                                */
+	if (akt_winp->screencol-akt_winp->ws_col == akt_winp->dx-1)
+	  fastcharout(akt_winp->textline-akt_winp->ws_line,
+		      akt_winp->screencol-akt_winp->ws_col,
+		      linebuff+akt_winp->textcol,ins_put);
     }
     else  /* Wenn nicht gescrollt werden musste: */
       if (cu_ret) /*Bei neu entstandener Unterstreichung Zeile neu anzeigen */
@@ -296,7 +325,7 @@ register char c;
       else        /* Sonst nur neu eingefuegtes Zeichen */
 	fastcharout(akt_winp->textline-akt_winp->ws_line,
 		    akt_winp->screencol-akt_winp->ws_col,
-		    linebuff+akt_winp->textcol,akt_winp->insflag?INSERT:PUT);
+		    linebuff+akt_winp->textcol,ins_put);
     akt_winp->textcol+= 1+2*akt_winp->underflag;
     akt_winp->screencol++; /* Cursorspalte anpassen */
     return(TRUE);
@@ -319,7 +348,8 @@ register char c;
 *  Beschreibung : Fuer eine neue Zeile wird Speicherplatz alloziert.
 *                 Anschliessend wird das Element korrekt hinter alinep
 *                 eingehaengt. Die neu eingefuegte Zeile wird zur
-*                 aktuellen Zeile.
+*                 aktuellen Zeile. Der Cursor wird in der ersten Spalte
+*                 plaziert.
 *                 Abhaengig vom Modus wird nl_blockadapt aufgerufen
 *
 *****************************************************************************/
@@ -361,6 +391,12 @@ int modus;
 *               Zeilenlimit ueberschritten wuerde, wird keine
 *               Zeile eingefuegt und FALSE zurueckgegeben.
 *               Sonst ist der RETURN-Wert TRUE.
+*               - Der Fensterinhalt des zugehîrigen Curses-Fensters
+*               wird in der Zeile, in der sich der Cursor vor der Operation
+*               befand, angepa·t (Lîschen bis zum Zeilenende falls Insert,
+*               rechten Rahmen restaurieren). Es wird also erwartet, da· der
+*               Fensterinhalt mit der Textstruktur Åbereinstimmt.
+*               - ws_col und ws_line werden _n_i_c_h_t angepa·t.
 *
 *****************************************************************/
 
@@ -370,6 +406,7 @@ int new_line()
   register char *zeil_anf, /* Zeiger auf Anfang der neuen Zeile        */
 		*ltext;    /* Zeiger auf aktuelle Zeile                */
   int           old_sc = akt_winp->screencol, /* alte Cursorspalte     */
+		i,         /* ZÑhler fÅr Zeichen in Zeile              */
 		y;         /* Zeilennummer absolut auf Bildschirm      */
   short int     rc;        /* Zeichen, mit dem Rahmen restauriert wird */
 
@@ -397,7 +434,17 @@ int new_line()
       mvwaddch(akt_winp->winp,y,
 	       akt_winp->dx+1,rc); /* Rechten Rahmen restaurieren */
       akt_winp->alinep->text = save_text(zeil_anf);/* neue zeile abspeichern*/
-      *zeil_anf = '\0';  /* ende alte zeile setzen und neue alte Zeile */
+
+      *zeil_anf = '\0';
+      /* Jetzt neue LÑnge berechnen (es kînnten am Ende Spaces stehen) */
+      for (i=strlen(ltext)-1; i>=0 && ltext [i] == ' '; i--);
+      /* Falls letztes Zeichen der Zeile ein unterstrichenes Space ist, so
+	 wuerde der Puffer normal ein Zeichen zu frueh abgeschnitten. Diesen
+	 Fall muss man also hier testen. */
+      if (i>0 && ltext[i-1]=='_' && ltext[i]=='')
+	ltext[i+2] = '\0';
+      else
+	ltext[i+1] = '\0'; /* ende alte zeile setzen und neue alte Zeile */
       akt_winp->alinep->prev->text = save_text(ltext);  /* abspeichern */
       free(ltext);                              /* alte zeile freigeben   */
     }
@@ -532,12 +579,25 @@ register int zeile;
 *  Funktion       aktuelle  Zeile einruecken (indent_line)
 *  --------
 *
+*  Parameter    : above     :
+*                   Typ          : char
+*                   Wertebereich : TRUE, FALSE
+*                   Bedeutung    : TRUE:  richte nach Zeile oberhalb aus
+*                                  FALSE: richte nach Zeile unterhalb aus
+*
 *  Beschreibung : Die aktuelle Zeile wird so eingerueckt, dass die Zeile
 *                 am Anfang soviele Blanks enthaelt wie die darueberliegende.
+*                 Unterstrichene Blanks werden dabei nicht als Blank
+*                 angesehen. Es wird vorausgesetzt, da· die aktuelle
+*                 Cursorposition am Beginn der einzurÅckenden Zeile liegt.
+*                 Nach AufÅhrung der Funktion steht der Cursor in der
+*                 Spalte, in der in der darÅberliegenden Zeile der Text
+*                 beginnt.
 *
 *****************************************************************************/
 
-void indent_line()
+void indent_line(above)
+char above;
 {
   /* *** interne Daten und Initialisierung *** */
   register int i,     /* Loopvariable fuer Marker und Blanks */
@@ -547,7 +607,8 @@ void indent_line()
 	       *txt2; /* Zeiger in neuen Zeilenstring   */
 
   check_buff(); /* sicherstellen, dass Pufferinhalt im Text ist */
-  if (txt = akt_winp->alinep->prev->text)
+  if (txt = above ? akt_winp->alinep->prev->text
+		  : akt_winp->alinep->next->text)
   { /* Wenn vorhergehende Zeile nicht leer, dann fuehrende Blanks zaehlen */
     while(*txt == ' ' && fastright(&txt,1))
       anz++;    /* Zaehlen, wie weit eingerueckt wird */
@@ -557,7 +618,7 @@ void indent_line()
     swap_int(&akt_winp->screencol,&sc); /* Cursor wieder an neuen Zeilenstart */
 
     if(akt_winp->alinep->text) /* Wenn einzurueckende Zeile nicht leer: */
-    { /* Platz fer Zeile und einzufuegende Blanks allozieren */
+    { /* Platz fÅr Zeile und einzufuegende Blanks allozieren */
       txt2 = txt = reserve_mem(strlen(akt_winp->alinep->text)
 			  + akt_winp->screencol+1);
       for(i=0;i<akt_winp->screencol;i++)   /* Blanks eintragen */
@@ -859,6 +920,56 @@ FILE *f;
 
 /*****************************************************************************
 *
+*  Funktion       Datei kopieren (copy_file)
+*  --------
+*
+*  Parameter    : n1        :
+*                   Typ          : char *
+*                   Wertebereich : Pointer auf ASCII-Zeichenkette
+*                   Bedeutung    : zu lesendes File
+*
+*                 n1        :
+*                   Typ          : char *
+*                   Wertebereich : Pointer auf ASCII-Zeichenkette
+*                   Bedeutung    : zu schreibende Datei
+*
+*  Beschreibung : Die Datei mit dem Namen n1 wird in die Datei mit dem Namen
+*                 n2 kopiert. Dabei erhÑlt n2 das Zugriffs- und Modifikations-
+*                 datum von n1.
+*
+*****************************************************************************/
+
+void copy_file (n1, n2)
+char *n1, *n2;
+{
+  char buff [MAXLENGTH]; /* Puffer fÅr zu lesende / schreibende Zeile */
+  FILE *f1,              /* Pointer fÅr Datei n1 */
+       *f2;              /* Pointer fÅr Datei n2 */
+  struct stat    n1_buf; /* Information Åber n1  */
+  struct utimbuf n2_buf; /* Information Åber n2  */
+
+  if (f1 = fopen (n1, "r"))
+  {
+    fstat (fileno(f1), &n1_buf);
+    if (f2 = fopen (n2, "w"))
+    {
+      while (!feof(f1))
+      {
+	fgets (buff, MAXLENGTH, f1);  /* \n bleibt in buff stehen */
+	if (!feof(f1))
+	  fputs (buff, f2);           /* und wird durch fputs wieder */
+      }                               /* geschrieben */
+      fclose (f2);
+      n2_buf.actime  = n1_buf.st_atime;
+      n2_buf.modtime = n1_buf.st_mtime;
+      utime (n2, &n2_buf);
+    }
+    fclose (f1);
+  }
+}
+
+/*****************************************************************************
+*
 *  Funktion       Schreib File auf Platte (schreib_file)
 *  --------
 *
@@ -905,7 +1016,8 @@ int schreib_file ()
     strcpy(&fn[len],".bak");  /* Filename des .bak-Files erzeugen */
 #endif
     unlink(buff);     /* falls schon ein .bak gleichen Namens existiert */
-    rename(akt_winp->filename,buff);   /* Datei in ...bak umbenennen */
+    copy_file(akt_winp->filename, buff);  /* Datei kopieren, um Links auf die
+			     Datei konsistent zu halten (wichtig bei OS/2) */
   }
   if (f = fopen (akt_winp->filename,"w"))
   {
@@ -970,6 +1082,10 @@ register int *sc,*count;
 *
 *  Funktion       Datei einlesen (lies_file)
 *  --------
+*
+*  Ergebnis     :   Typ          : int
+*                   Wertebereich : TRUE,FALSE
+*                   Bedeutung    : Flag, ob eine Datei geladen wurde
 *
 *  Beschreibung : In die Fensterstruktur des aktuellen Fensters wird der
 *                 Text aus der Datei, deren Name in filename steht, geladen.
@@ -1155,4 +1271,148 @@ void rest_delline()
     akt_winp->alinep->text = save_text(sd_line); /* mehrmals einfuegen */
     akt_winp->screencol = old_sc; /* Screencol restaurieren */
   } /* nur moeglich, wenn sichergestellt ist, dass sd_line gleichbleibt */
+}
+
+/*****************************************************************************
+*
+*  Funktion       Absatz bÅndig ausrichten (reflow_paragraph)
+*  --------
+*
+*  Ergebnis     :   Typ          : int
+*                   Wertebereich : TRUE,FALSE
+*                   Bedeutung    : Flag, ob Operation ohne Fehler
+*                                  ausgefÅhrt werden konnte.
+*
+*  Beschreibung : Ab der aktuellen Cursorposition wird jede Zeile
+*                 soweit aufgefÅllt, bis sie mîglichst knapp an den
+*                 rechten Fensterrand heranreicht. Das wird bis zur
+*                 nÑchsten leeren Zeile durchgefÅhrt.
+*
+*****************************************************************************/ 
+
+int reflow_paragraph()
+{ 
+  int  old_sc,            /* Zwischenspeicher Cursorspalte */
+       new_sc,            /* neue x-Position, lÑuft mit.   */        
+       new_tl,            /* neue Cursorzeile, lÑuft mit.  */        
+       x_l,               /* linker Rand fÅr Reflowing     */        
+       x_r,               /* rechter Rand fÅr Reflowing    */
+       fll,               /* merkt das Ergebnis von fastll */
+       i;                 /* ZÑhler                        */        
+  char finished = FALSE,  /* Flag, ob Textende erreicht    */
+       error = FALSE;     /* Flag, ob wÑhrend der Reformatierung ein 
+			     Fehler auftrat */                       
+
+  new_sc = akt_winp->screencol;
+  new_tl = akt_winp->textline;
+  x_r    = akt_winp->dx-1;
+
+  /* Zuerst mÅssen die RÑnder ermittelt werden. */
+  fill_buff();        /* evtl. Zeile in Puffer kopieren */
+  /* Jetzt suche erstes non-Blank in dieser Zeile, um x_l zu bestimmen */
+  if (!akt_winp->alinep->text)
+     x_l = 0;
+  else
+  {
+     for (i=0; i<3*MAXLENGTH && linebuff[i]==' '; i++) ;
+     if (i == 3*MAXLENGTH)
+	x_l = 0;
+     else
+	x_l = i;
+  }
+
+  /* Jetzt geht's los: Bis zur nÑchsten Leerzeile die Zeilen jeweils
+     soweit auffÅllen, da· fÅr jede Zeile des Absatzes anschlie·end die
+     folgende Bedingung gilt (ein Wort ist dabei immer als eine von
+     Whitespaces begrenzte Zeichenfolge ohne Whitespaces zu verstehen):
+	Das erste Wort der nÑchsten Zeile wÅrde, wenn es an diese
+	Zeile angehÑngt wÅrde, dazu fÅhren, da· diese Zeile Åber x_r
+	hinausragt, oder die nÑchste Zeile ist leer. 
+	Das erste non-Whitespace-Zeichen der Zeile steht
+	in Spalte x_l.
+  */
+  check_buff();       /* Puffer in Text zurÅckschreiben */
+  while (akt_winp->alinep->text /* Reflow geht bis zur nÑchsten Leerzeile */
+	&& !error && !finished  /* oder Textende erreicht                 */
+	&& !clear_buff)         /* oder bis Ctrl-Break gedrÅckt wird      */
+  {
+    /* Solange joinen, bis aktuelle Zeile zu lang bzw. Absatzende erreicht */
+    old_sc = akt_winp->screencol;
+    while ((fll=fastll (akt_winp->alinep->text)) < x_r
+	   && akt_winp->alinep->next->text)
+      do_join();
+    akt_winp->screencol = old_sc;
+
+    if (fll > x_r)  /* Splitting ist nîtig */
+    {
+      /* Jetzt zum rechten Fensterrand positionieren */
+      for (i=(old_sc > x_r ? old_sc - x_r : x_r - old_sc); i>0; i--)
+	if (old_sc > x_r)
+	   left();
+	else
+	   right();
+
+      /* Von dort aus das nÑchste Blank zur linken suchen. */
+      while (akt_zeichen() != ' ' && akt_winp->screencol > 0)
+	left();
+      if (akt_zeichen() != ' ')    /* am linken Rand angekommen, und       */
+      {                            /* am Zeilenanfang kein Blank,          */
+	finished = !down();        /* Dann mit nÑchster Zeile weitermachen */
+	check_and_scroll_by_one(); /* scrollen, falls nîtig                */
+      }
+      else
+      { /* Cursor steht jetzt auf einem Blank, rechts davon beginnt Wort */
+	/* Die Cursorspalte ist <= x_r                                   */
+	right();                     /* auf Wortanfang stellen */
+	old_sc = akt_winp->screencol;
+	if (new_line())              /* klappt ZeileneinfÅgen? */
+	{
+	  check_and_scroll_by_one(); /* scrollen, falls nîtig              */
+	  if (new_sc >= old_sc)      /* wurde links vom Cursor gesplittet? */
+	  {                          /* Dann neue Cursorposition ent-      */
+	    new_sc -= old_sc;        /* sprechend anpassen                 */
+	    new_tl++;
+	  }
+	  if (akt_winp->autoindflag) /* EinrÅckung beim Reflowing erfolgt  */
+	  {                          /* gemÑ· aktuellem Autoindent-Flag    */
+	    if (akt_winp->alinep->next->text)
+	      indent_line(FALSE);    /* Wenn Zeile unterhalb nicht leer,   */
+	    else                     /* dann nach unterere Zeile,          */
+	      indent_line(TRUE);     /* sonst nach oberer Zeile einrÅcken  */
+	    if (akt_winp->screencol >= x_r) /* wÅrde zu endlosem Splitting */
+	    {                               /* fÅhren. Fehler->Abbruch     */
+	      pe_or (PROMPT_ERRINDRFL);
+	      error = TRUE;
+	    }
+	    else
+	      if (akt_winp->textline == new_tl)
+		new_sc += akt_winp->screencol; /* EinrÅckung bei Cursor-    */
+	  }                                    /* anpassung berÅcksichtigen */
+	  if (akt_winp->screencol < akt_winp->ws_col)  /* Cursor rechts    */
+	    akt_winp->ws_col = akt_winp->screencol;    /* vom linken Rand? */
+	}
+	else  /* new_line schlug fehl */
+	{
+	  pe_or (B_SIZE_ERRTEXT);
+	  error = TRUE;
+	}
+      }
+    } /* end of if Zeile war zu lang und mu·te gesplittet werden */
+    else  /* In dieser Zeile ist jetzt alles OK. NÑchste Zeile: */
+    {
+      finished = !down();
+      check_and_scroll_by_one(); /* scrollen, falls nîtig              */
+    }
+  } /* end of while nicht leere Zeile (also Absatzende) oder Break */
+
+  /* Jetzt mu· nur noch der Cursor an die richtige Position gesetzt
+     werden. Diese wurde gîÅcklicherweise in new_tl und new_sc
+     mitgeschrieben. */
+  check_buff();
+  gotox (new_tl);
+  akt_winp->screencol = new_sc;
+  if (!adapt_screen (1))  /* Wenn adapt_screen kein show_win gemacht hat, */
+    show_win (W_AKT);     /* mu· das an dieser Stelle nachgeholt werden   */
+
+  return !error;
 }

@@ -7,7 +7,6 @@
 #define TRUE  1
 #define FALSE 0
 #define SZ_SC (COLS*LINES*sizeof(short int)) /* BildschirmlÑnge in Bytes */
-#define STD_ATTR 7         /* Standardattribut (White) */
 #define BUFF_SIZE 256      /* Grî·e des Zeichenpuffers fÅr getch */
 
 #include <stdlib.h>
@@ -23,13 +22,23 @@ typedef struct s_win
 	    _dlyflag,            /* Flag, ob nodelay gesetzt ist */
 	    _tabflag,            /* Flag, ob Tabs expandiert werden sollen */
 	    _attribs;            /* Zeichenattribute */
-} WINDOW;
+} WINDOW;                                       
 
-#ifndef cur_main
-extern WINDOW *curscr,*stdscr,*newwin();
-extern char rawflag,echoflag,nlflag;
+
+
+#ifndef cur_main                                
+extern WINDOW *curscr,*stdscr,*newwin();        
+extern char rawflag,echoflag,nlflag;            
 extern short int LINES,COLS;
-#endif
+extern short int A_NORMAL;
+extern short int A_STANDOUT;
+extern short int A_UNDERLINE;
+extern short int A_BLINK;
+extern short int A_DIM;
+extern short int A_BOLD;
+extern short int A_INVIS;
+extern short int STD_ATTR;
+#endif                
 
 #define move(y,x)    wmove(stdscr,y,x)
 #define getyx(w,y,x) y=w->_cursor_y; x=w->_cursor_x
@@ -72,14 +81,6 @@ extern short int LINES,COLS;
 #define mvdeltoeol(y,x) (wmove(stdscr,y,x),wdeltoeol(stdscr))
 #define mvdeleteln(y,x) (wmove(stdscr,y,x),wdeleteln(stdscr))
 #define mvinsertln(y,x) (wmove(stdscr,y,x),winsertln(stdscr))
-
-#define A_NORMAL    0    /* Keine Attribute */
-#define A_STANDOUT  2    /* GrÅn */
-#define A_UNDERLINE 4    /* Rot */
-#define A_BLINK     128  /* Binken */
-#define A_DIM       8    /* Nur intense */
-#define A_BOLD      2    /* GrÅn */
-#define A_INVIS     136  /* Intense auf Intense */
 
 #define OK  1
 #define ERR 0

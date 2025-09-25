@@ -59,12 +59,14 @@ extern marker_typ marker[];
 #ifdef OS2
 extern int mouse_handle;
 extern char mouse_active;
-extern TID mouse_ThreadID, mouse_jn_ThreadID;
+extern TID mouse_ThreadID;
 #endif
 #endif
 
 /* *** interne Daten und Initialisierung *** */
 void do_join();
+void do_up();
+void do_eol();
 extern char *on_off[], /* Hilfstexte */
 		       /* fuer Togglen der globalen Flags */
 	    helpflag;  /* Flag: Hilfstexte anzeigen       */
@@ -160,12 +162,19 @@ void do_del_word()
 
 void do_wleft()
 {
-  if (word_left()    /* Cursor ein Wort nach links */
-  && akt_winp->screencol < akt_winp->ws_col) /* klappte das, und steht der */
-  /* Cursor nun links vom Bildschirm, muss das Fenster angepasst werden. */
+  if (word_left())    /* Cursor ein Wort nach links */
   {
-    akt_winp->ws_col = akt_winp->screencol; /* Aktuelle Spalte wird erste */
-    sw_ohne_refresh(W_AKT); /* Fensterinhalt wird neu angezeigt */
+    if (akt_winp->screencol < akt_winp->ws_col) /* klappte das, und steht der */
+    /* Cursor nun links vom Bildschirm, muss das Fenster angepasst werden. */
+    {
+      akt_winp->ws_col = akt_winp->screencol; /* Aktuelle Spalte wird erste */
+      sw_ohne_refresh(W_AKT); /* Fensterinhalt wird neu angezeigt */
+    }
+  }
+  else
+  {
+     do_up();
+     do_eol();
   }
   setz_cursor(W_AKT);  /* Cursor auf seine richtige Position setzen */
 }
@@ -454,6 +463,9 @@ void do_backtab()
 *                       AUTOINDENT: Tab richtet sich nach darueberliegender
 *                                   Zeile.
 *                       INSERT:     Spaces werden eingefuegt.
+*                 Achtung: Es wird vorausgesetzt, daá word_right() nur
+*                          vorwaerts geht, die Distanz zur aktuellen Spalte
+*                          also immer positiv ist!
 *
 *****************************************************************************/
 
@@ -463,6 +475,7 @@ void do_tab()
   register int old_sc,  /* Zwischenspeicher fuer Cursorspalte */
 	       dsc = 0, /* Entfernung, die durch Tab geskipt wird */
 	       anz_ins; /* Anzahl der eingefuegten Blanks */
+  char         scrolled = FALSE; /* Flag, ob enter_char scrollte */
 
   if(akt_winp->autoindflag && up()) /* Bei Autoindent eine Zeile hoch */
   {
@@ -485,7 +498,7 @@ void do_tab()
     }
     else
       while(anz_ins--)   /* Eingefuegte Zeichen mit Blanks belegen */
-	enter_char(' ');
+	enter_char(' ', &scrolled, scrolled?PUT:INSERT, FALSE);
   }
   else  /* Falls im Overwrite-Modus, dsc Zeichen nach rechts bewegen */
     while(dsc--)
@@ -504,9 +517,9 @@ void do_tab()
 *  Funktion       Page Up ausfuehren (do_pgup)
 *  --------
 *
-*  Beschreibung : Der interne Cursor wird um eine Seite hochbewegt.
-*                 Dann wird die Fensterposition angepasst und der
-*                 Fensterinhalt erneut dargestellt.
+*  Beschreibung : Der interne Cursor wird um eine Seite hochbewegt. Dann
+*                 wird die Fensterposition angepasst und der Fensterinhalt
+*                 erneut dargestellt.
 *
 *****************************************************************************/
 
@@ -568,25 +581,20 @@ void do_pgdn()
 void do_open()
 {
   /* *** interne Daten *** */
-  int indpos,  /* Zur Berechnung, wie weit eingerueckt werden muss */
-      old_sc;  /* Zwischenspeicher fuer alte Cursorspalte          */
+  int old_sc;  /* Zwischenspeicher fuer alte Cursorspalte          */
 
   if(akt_winp->maxline < MAX_ANZ_LINES-1) /* Nur neue Zeile einfuegen, */
   {      /* wenn dadurch maximale Zeilenzahl nicht ueberschritten wird */
     check_buff();  /* evtl. noch im Puffer befindliche Daten in Text kopieren */
     if(akt_winp->maxline >= 0)   /* Enthaelt Text mindestens eine Zeile ? */
     {                     /* Ja, dann muss auf Autoindent geachtet werden */
-      if(akt_winp->autoindflag)             /* Autoindent eingeschaltet ? */
-	indpos = akt_winp->alinep->text ? strspn(akt_winp->alinep->text," ")
-					: 0; /* Ja, dann die Anzahl */
-		      /* fuehrender Blanks in der aktuellen Zeile ermitteln */
       akt_winp->alinep = akt_winp->alinep->prev; /* da up nicht vor die erste */
       akt_winp->textline--; /* Zeile geht, muss man "zu Fuss" eine Zeile hoch.    */
       old_sc = akt_winp->screencol;    /* Zeile wird dahinter eingefuegt, */
       akt_winp->screencol = MAXLENGTH; /* also screencol aufs Ende        */
       koppel_line(ADAPT_COORS);  /* Zeile in Textstruktur einfuegen      */
       if (akt_winp->autoindflag) /* Bei Autoindent stellt man sich ueber */
-	akt_winp->screencol = indpos; /* den Anfang der Zeile darunter   */
+	indent_line(FALSE);           /* den Anfang der Zeile darunter   */
       else
 	akt_winp->screencol = old_sc;
 
@@ -670,20 +678,20 @@ int do_newline()
       }
       else /* Wenn nicht gescrollt werden muss, eine Zeile einfuegen */
 	text_down(akt_winp->textline-akt_winp->ws_line);
-      if(akt_winp->autoindflag)    /* Wenn Autoindent aktiv ist, */
-      {                            /* neue Zeile korrekt einruecken */
-	indent_line();             /* Dann wird getestet, ob der Cursor */
-	if(akt_winp->ws_col + akt_winp->dx <= akt_winp->screencol /* rechts */
-	|| akt_winp->screencol < akt_winp->ws_col) /* oder links vom */
-	{                                          /* Fenster steht  */
-	  akt_winp->ws_col = akt_winp->screencol;  /* Wenn ja, dann wird */
-	  swflag = TRUE; /* aktuelle Spalte zur ersten sichtbaren, und */
-	}            /* das Fenster wird als neu zu zeichnend markiert */
-	else         /* Wenn der Cursor innerhalb des Fensters blieb, */
-	  lineout(akt_winp->textline - akt_winp->ws_line); /* dann muss */
-      } /* nur die Zeile neu gezeigt werden */
-    }
-    else /* Wenn keine neue Zeile eingefuegt werden konnte, dann */
+      if(akt_winp->autoindflag)    /* Wenn Autoindent aktiv ist,       */
+	indent_line(TRUE);         /* neue Zeile korrekt einruecken    */
+				   /* nur die Zeile neu gezeigt werden */
+      /* Dann wird getestet, ob der Cursor */
+      if(akt_winp->ws_col + akt_winp->dx <= akt_winp->screencol /* rechts */
+      || akt_winp->screencol < akt_winp->ws_col) /* oder links vom */
+      {                                          /* Fenster steht  */
+	akt_winp->ws_col = akt_winp->screencol;  /* Wenn ja, dann wird */
+	swflag = TRUE; /* aktuelle Spalte zur ersten sichtbaren, und   */
+      }            /* das Fenster wird als neu zu zeichnend markiert   */
+      else         /* Wenn der Cursor innerhalb des Fensters blieb,    */
+	lineout(akt_winp->textline - akt_winp->ws_line); /* dann muss  */
+    }                          /* die neue Textzeile angezeigt werden  */
+    else       /* Wenn keine neue Zeile eingefuegt werden konnte, dann */
     {
       print_err (T_SIZE_ERRTEXT); /* Fehlermeldung ausgeben */
       return (FALSE);             /* und Funktion abbrechen */
@@ -699,13 +707,13 @@ int do_newline()
       akt_winp->ws_line++; /* Wenn ja, Fensterstart anpassen */
       text_up(0);          /* und Fensterinhalt scrollen */
     }
-  }
-  /* Wenn Cursor am linken Rand stehen kann, (kein Autoindent oder kein */
-  /* Insert-Mode) dann muss die erste Spalte sichtbar sein              */
-  if((!akt_winp->autoindflag || !akt_winp->insflag) && akt_winp->ws_col)
-  { /* Ist das nicht so, wird der Fensterinhalt als neu zu zeichnend   */
-    swflag = TRUE;        /* markiert und Spalte 0 als erste sichtbare */
-    akt_winp->ws_col = 0; /* markiert. */
+    /* Wenn Cursor links vom Rand steht, dann muss die */
+    /* erste Spalte sichtbar sein                      */
+    if(akt_winp->ws_col)
+    { /* Ist das nicht so, wird der Fensterinhalt als neu zu zeichnend   */
+      swflag = TRUE;        /* markiert und Spalte 0 als erste sichtbare */
+      akt_winp->ws_col = 0; /* markiert. */
+    }
   }
 
      /*** Testen, ob Zeile an SHELL uebergeben werden muss *** */
@@ -783,7 +791,7 @@ void do_delline()
 	akt_winp->ws_line = akt_winp->textline; /* sichtbaren machen    */
     show_win(W_AKT); /* Anschliessend Fensterinhalt anzeigen                 */
   }
-}
+} 
 
 /*****************************************************************************
 *
@@ -791,40 +799,52 @@ void do_delline()
 *  --------
 *
 *  Beschreibung : Mittels der Funktion join werden die aktuelle und die
-*                 nachfolgende Zeile verknuepft. Falls dabei ein Fehler
+*                 nachfolgende Zeile verknuepft. Bei der Verknpfung wird
+*                 zwischen dem ersten non-Whitespace der nachfolgenden Zeile
+*                 und dem letzten Zeichen der aktuellen Zeile genau ein
+*                 Space eingefgt. Falls bei diesen Aktionen ein Fehler
 *                 auftritt, wird gegebenfalls eine Fehlermeldung ausgegeben.
 *
-*****************************************************************************/
- 
+*****************************************************************************/ 
+
 void do_join()
 {
   /* *** interne Daten *** */
-  char first_of_2nd_is_blank,
-       first_is_blank;
+  char first_of_2nd_is_blank,  /* Flag, ob nachfolgende Zeile mit WS beginnt */
+       second_is_empty,        /* Flag, ob nachfolgende Zeile leer ist       */
+       dw,                     /* Flag, ob Leerraum zu l”schen ist           */
+       first_is_blank;         /* Flag, ob aktuelle Zeile leer ist           */
 
   if (akt_winp->maxline > 0      /* Geht nur, wenn mehr als eine Zeile */
   && akt_winp->alinep->next != akt_winp->dummyp) /* und aktuelle Z. */
   {                              /* nicht letzte Zeile ist */
-    first_of_2nd_is_blank = (!akt_winp->alinep->next->text ||
-		      *(akt_winp->alinep->next->text) == ' ');
+    second_is_empty = !akt_winp->alinep->next->text;
+    first_of_2nd_is_blank = (second_is_empty ||
+			     *(akt_winp->alinep->next->text) == ' ');
+    dw = (!second_is_empty && strlen(akt_winp->alinep->next->text) >= 2
+	  && *(akt_winp->alinep->next->text+1) == ' ');
     first_is_blank = !akt_winp->alinep->text;
     do_eol();            /* Zun„chst ein Zeichen rechts vom Zeilenende */
-    if (first_of_2nd_is_blank)  /* Ist erstes Zeichen der n„chsten Zeile kein */
-      do_right();        /* Blank, dann nicht nach rechts. */
     switch (join(ADAPT_COORS))   /* Verknuepfung ausfuehren, Ergebnis testen */
     {
-      case J_TOOLONG : print_err(L_SIZE_ERRTEXT); /* Zeile wurde zu lang, */
-		       break;                     /* Meldung ausgeben     */
-      case J_OK      : if(first_of_2nd_is_blank) /* Falls Blank, dann */
-			 do_del_word();   /* Text ranziehen */
+      case J_TOOLONG : print_err(L_SIZE_ERRTEXT); /* Zeile wurde zu lang,    */
+		       break;                     /* Meldung ausgeben        */
+      case J_OK      : if(first_of_2nd_is_blank   /* Falls n„chste Zeile     */
+		       && !second_is_empty)       /* nicht leer ist und      */
+						  /* mit einem Blank beginnt */
+		       {
+			 do_right();      /* ein Blank dazwischen lassen */
+			 if (dw)
+			    do_del_word();   /* Text ranziehen */
+		       }
 		       else               /* Sonst Blank einfgen */
-		       { /* geht gut, da join() mindestens ein Zeichen */
-			 /* Aber nur einfgen, wenn erste Zeile nicht
-			    leer war ! */
+		       { /* geht gut, da bei join mindestens ein Zeichen
+			    Reserve. Aber nur einfgen, wenn erste Zeile 
+			    nicht leer war ! */
 			 if (!first_is_blank)
 			 {
 			   insert(1);  /* Platz am Zeilenende l„át */
-			   enter_char(' ');
+			   enter_char(' ', (char*) 0, akt_winp->insflag, FALSE);
 			 }
 		       }
 		       show_win(W_AKT); /* Alles OK, Fensterinhalt neu anzeigen */
@@ -930,8 +950,6 @@ void ex_load()
 #ifdef OS2
   mouse_active = FALSE;
   DosWaitThread (&mouse_ThreadID, DCWW_WAIT);
-  if (mouse_jn_ThreadID) /* Wurde schon einmal ja_nein aufgerufen? */
-    DosWaitThread (&mouse_jn_ThreadID, DCWW_WAIT);
 #else
   set_mouse_int(0); /* Mausroutine maskieren */
 #endif

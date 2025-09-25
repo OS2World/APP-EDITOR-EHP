@@ -45,11 +45,10 @@ extern char *getenv(),*sd_line,helpflag;
 #undef getch()
 extern int read_config();
 #ifdef MOUSE
-extern int mouse_jn; /* Variable fÅr Maus in ja_nein */
 #ifdef OS2
 extern char mouse_active;
 extern short int mouse_handle;
-extern TID mouse_ThreadID, mouse_jn_ThreadID;
+extern TID mouse_ThreadID;
 #endif /* OS2 */
 #endif /* MOUSE */
 
@@ -69,6 +68,7 @@ int        blockattr,            /* Attribut zum Highlighten eines Blocks */
 char       highblockflag = TRUE, /* Sollen Bloecke gehighlighted werden ? */
 	   backupflag=TRUE,      /* Es sollen .bak-Files erzeugt werden   */
 	   regexflag=TRUE,       /* Es soll Patternmatching angew. werden */
+	   linebrkflag=FALSE,    /* Automatischer Zeilenumbruch p.d. aus  */
 	   def_aiflag = FALSE;   /* Normalerweise kein Autoindent         */
 char       *conffile = PF_CONFIG,/* Pfad der Config-Datei                 */
 	   *loadfile = PF_LOAD;  /* Pfad des Loadfiles                    */
@@ -76,7 +76,7 @@ block_typ  global_block;         /* Paste-Puffer fuer globalen Block      */
 marker_typ marker[ANZ_MARKER];   /* Feld fuer alle Marker                 */
 puff_typ   macro[ANZ_MACROS];    /* Feld fuer alle Macros                 */
 char       clear_buff = FALSE,   /* soll Puffer bei naechsten newwgetch() */
-				 /* geloescht werden? */
+				 /* geloescht werden? Wurde Brk gedrÅckt? */
 	   *tasten_inf = PF_TASTEN; /* Name des Tastenbelegungsfiles      */
 #ifdef OS2
 HMTX       sem_handle;           /* Handle fÅr Semaphor, der Zusammelspiel*/
@@ -126,9 +126,9 @@ char *fehlertext;
 void print_err(fehlertext)
 char *fehlertext;
 {
-  pe_or(fehlertext);    /* Fehlermeldung ausgeben und aus RETURN warten */
+  pe_or(fehlertext);    /* Fehlermeldung ausgeben und auf RETURN warten */
   if(akt_winp->winp)    /* nur wenn schon ein window angefordert wurde  */
-    setz_cursor(W_AKT);      /* s. koppel_win() */
+    setz_cursor(W_AKT); /* s. koppel_win() */
 }
 
 /*****************************************************************************
@@ -409,9 +409,6 @@ char *s;
 
   print_stat (s);           /* Uebergebenen String ausgeben   */
   print_stat(PROMPT_YES_NO);  /* Zusatz anhaengen               */
-#ifdef MOUSE
-  mouse_jn_init(TRUE);      /* Maus fÅr ja_nein aktivieren    */
-#endif
   nodelay(status,TRUE); /* Fenster wg. Maus auf NODELAY schalten */
   do                        /* Solange ein Zeichen lesen, bis */
   { jn = newwgetch(status); /* es eins von j,J,y,Y,n,N ist        */
@@ -419,22 +416,11 @@ char *s;
     if (jn == -1)
       DosSleep (10);
 #endif
-  } while (!strchr ("jny,YJN",(char)jn)
-#ifdef MOUSE
-	 && mouse_jn == NO_KLICK
-#endif
-				);
+  } while (!strchr ("jny,YJN",(char)jn));
   nodelay(status,FALSE);  /* Wieder DELAY einschalten */
-#ifdef MOUSE
-  mouse_jn_init(FALSE);     /* Maus fÅr ja_nein deaktivieren  */
-#endif
   clear_stat();             /* Statuszeile wieder loeschen    */
 
-  if (jn == 'n' || jn == 'N'
-#ifdef MOUSE
- || mouse_jn == KLICK_RIGHT
-#endif
-			   )
+  if (jn == 'n' || jn == 'N')
     return (FALSE);
   return (TRUE);
 }
@@ -480,10 +466,33 @@ char *modus;
 
 /*****************************************************************************
 *
+*  Funktion       Integer aus EHPINIT lesen (int_from_env)
+*  --------
+*
+*  Beschreibung : Es wird vorausgesetzt, da· strtok bereits auf der
+*                 Umgebungsvariablen ausgefÅhrt wurde, so da· ein erneuter
+*                 Aufruf mit NULL als Parameter das nÑchste Token liefert.
+*                 Ist kein weiteres Token vorhanden, so wird stillschweigend
+*                 0 zurÅckgeliefert. Ansonsten wird das Token mit atoi in
+*                 einen int konvertiert und das Ergebnis zurÅckgeliefert.
+*
+****************************************************************************/
+
+int int_from_env ()
+{
+  int result = 0;
+  char *tok = strtok ((char*) NULL, " ");
+  if (tok)
+    result = atoi(tok);
+  return result;
+}
+
+/*****************************************************************************
+*
 *  Funktion       Environment checken (check_env)
 *  --------
 *
-*  Beschreibung : Die Umgebung wird nach der Variablen EHPINIT abgesucht.
+*  Beschreibung : Die Umgebungsvariable EHPINIT wird in der Umgebung gesucht.
 *                 Wird sie gefunden, so wird der Inhalt analysiert.
 *                 Folgende Token haben folgenden Effekt:
 *                   deftab <n>   : Default-Tablaenge auf <n> setzen
@@ -495,6 +504,8 @@ char *modus;
 *                   nobak        : Defaultmaessig keine .bak-Files
 *                   screen <mode>: Bildschirmgrî·e in Zeilen und Spalten
 *                   keys <f>     : Name des Tastaturbeschreibungsfiles = <f>
+*                   noregex      : RegulÑre AusdrÅcke beim Suchen ausgesch.
+*                   linebrk      : Autom. Zeilenumbruch eingeschaltet
 *
 ****************************************************************************/
 
@@ -502,11 +513,15 @@ void check_env()
 {
   /* *** interne Daten *** */ 
   char *ehp_init, /* Zeiger auf Inhalt der Umgebungsvariable     */
+       *copy_of_ehp_init,
        *konv,     /* Zeiger zur Konvertierung in Kleinbuchstaben */
        *token;    /* Zeiger auf aktuellen Parameter              */
   int  i;         /* Integerwert der Tablaenge                   */
 
   if(ehp_init = getenv("EHPINIT"))
+  {
+    copy_of_ehp_init = strcpy(reserve_mem(strlen(ehp_init)+1), ehp_init);
+    ehp_init = copy_of_ehp_init;
     while(token = strtok(ehp_init," "))
     {
       ehp_init = NULL;  /* fuer strtok */
@@ -514,61 +529,60 @@ void check_env()
 	*konv = tolower (*konv); /* Token in Kleinbuchstaben konvertieren */
       if(!strcmp("deftab",token))
       {
+	if((i = int_from_env()) > 0 && i < MAXLENGTH)
+	  def_tab = i;
+      }
+      else if(!strcmp("nohelp",token))
+	helpflag = FALSE;
+      else if(!strcmp("autoind",token))
+	def_aiflag = TRUE;
+      else if(!strcmp("noshowblock",token))
+	highblockflag = FALSE;
+      else if(!strcmp("conffile",token))
+      {
 	if(!(token = strtok(ehp_init," ")))
 	  break;        /* war letzter token */
-	if((i = atoi(token)) > 0 && i < MAXLENGTH)
-	{
-	  def_tab = i;
-	  continue;
-	}
+	conffile = token;
       }
-      if(!strcmp("nohelp",token))
-	helpflag = FALSE;
-      else
-	if(!strcmp("autoind",token))
-	  def_aiflag = TRUE;
-	else
-	  if(!strcmp("noshowblock",token))
-	    highblockflag = FALSE;
-	  else
-	    if(!strcmp("conffile",token))
-	    {
-	      if(!(token = strtok(ehp_init," ")))
-		break;        /* war letzter token */
-	      conffile = token;
-	    }
-	    else
-	      if(!strcmp("loadfile",token))
-	      {
-		if(!(token = strtok(ehp_init," ")))
-		  break;        /* war letzter token */
-		loadfile = token;
-	      }
-	      else
-		if(!strcmp("nobak",token))
-		  backupflag = FALSE;
+      else if(!strcmp("loadfile",token))
+      {
+	if(!(token = strtok(ehp_init," ")))
+	  break;        /* war letzter token */
+	loadfile = token;
+      }
+      else if(!strcmp("nobak",token))
+	  backupflag = FALSE;
 
-#ifdef OWN_CURSES /* Bildschirmgrî·e lÑ·t sich nur mit dem eigenen Curses
-		     anpassen ! */
-		else
-		  if(!strcmp("screen",token))
-		  {
-		    if(!(token = strtok(ehp_init," ")))
-		      break;        /* war letzter token */
-		    set_lines_cols(token); /* Bildschirmgrî·e setzen */
-		  }
+#ifdef OWN_CURSES /* Bildschirmgrî·e und Farben lassen sich nur mit dem
+		     eigenen Curses anpassen ! */
+      else if(!strcmp("screen",token))
+      {
+	if(!(token = strtok(ehp_init," ")))
+	  break;        /* war letzter token */
+	set_lines_cols(token); /* Bildschirmgrî·e setzen */
+      }
+      else if(!strcmp("clr_text", token))
+	STD_ATTR = int_from_env();
+      else if(!strcmp("clr_frame", token))
+	A_STANDOUT = int_from_env();
+      else if(!strcmp("clr_block", token))
+	A_BOLD = int_from_env();
+      else if(!strcmp("clr_under", token))
+	A_UNDERLINE = int_from_env();
 #endif
-		  else
-		    if(!strcmp("keys", token))
-		    {
-		      if(!(token = strtok(ehp_init," ")))
-			break;      /* war letzer Token */
-		      tasten_inf = strcpy(reserve_mem (strlen(token)),token);
-		    }
-		    else
-		      if(!strcmp("noregex", token))
-			regexflag = FALSE;
+      else if(!strcmp("keys", token))
+      {
+	if(!(token = strtok(ehp_init," ")))
+	  break;      /* war letzer Token */
+	tasten_inf = strcpy(reserve_mem (strlen(token)+1),token);
+      }
+      else if(!strcmp("noregex", token))
+	regexflag = FALSE;
+      else if(!strcmp("linebrk", token))
+	linebrkflag = TRUE;
     }
+    free (copy_of_ehp_init);
+  }
 }
 
 /******************************************************************************
@@ -600,8 +614,8 @@ int sig;
   {
     if(ja_nein(PROMPT_FATAL))
       save_all();
-    ende(sig, TRUE);     /* Speicherbereiche werden automat. v. Unix freigegeben */
-  }
+    ende(sig, TRUE);     /* Speicherbereiche werden automatisch */
+  }                      /* vom Betriebssystem freigegeben      */
   signal(sig, catchsig); /* Adresse dieser Funktion wieder eintragen */
 }
 
@@ -704,9 +718,7 @@ void init()
 *
 *****************************************************************************/
 
-void ende(r, wait_mouse)
-int r;
-char wait_mouse;
+void ende(int r, char wait_mouse)
 {
   clear();      /* Bildschirm loeschen */
   refresh();
@@ -718,11 +730,7 @@ char wait_mouse;
      selbstÑndig und die Maus wird geschlossen. Hier mu· dann nur noch
      auf die Terminierung des Threads gewartet werden. */
   if (wait_mouse)
-  {
     DosWaitThread (&mouse_ThreadID, DCWW_WAIT);
-    if (mouse_jn_ThreadID) /* Wurde schon einmal ja_nein aufgerufen? */
-      DosWaitThread (&mouse_jn_ThreadID, DCWW_WAIT);
-  }
 #else
   set_mouse_int(0); /* Mausroutine maskieren */
 #endif
@@ -811,7 +819,7 @@ void alles_frei()
     gb_win_frei(); /* gb_win_frei loescht Fenster aus Liste und */
   }                /* macht akt_winp zu ->prev */
   if(global_block.bstart)     /* globalen Block evtl. freigeben */
-    block_free(global_block.bstart);
+    block_free(&global_block.bstart);
   line_free(sd_line);      /* zuletzt geloeschte Zeile freigeben */
   free(akt_winp);          /* dummy auch freigeben */
 }
@@ -877,7 +885,7 @@ char **argv[];
 	  (struct filenamelist *) reserve_mem (sizeof (struct filenamelist));
 	p = p->next;
 	p->next = NULL;
-	p->name = strcpy ((char*) reserve_mem (strlen ((*argv) [argv_index])),
+	p->name = strcpy ((char*) reserve_mem (strlen((*argv)[argv_index])+1),
 			  (*argv) [argv_index]);
 	complete_length += strlen ((*argv) [argv_index]) + 1;
 	new_argc++;
@@ -970,6 +978,7 @@ char **argv;
       if (koppel_win())
       {
 	akt_winp->filename = save_text(argv[argc]);
+	akt_winp->block.bstart = (bzeil_typ*) NULL;
 	if(!lies_file()) /* und versuchen, die Datei zu laden */
 	{
 	  free(akt_winp->dummyp);
@@ -1028,6 +1037,7 @@ int main (argc,argv)
 int argc;
 char **argv;
 {
+  /* The following is for debugging purposes only: */
   init();  /* Tastaturbelegung laden, Variablen initialisieren, Umgebungs- */
 	   /* variable bearbeiten, Signale abfangen, Curses initialisieren */
   hndl_params(argc,argv,read_config(argc)); /* Config-Datei lesen und Para-*/

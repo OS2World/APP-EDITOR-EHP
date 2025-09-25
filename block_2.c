@@ -28,27 +28,29 @@ extern bzeil_typ *save_rechteck(),*save_normal();
 *  --------
 *
 *  Parameter    : blockstart :
-*                   Typ          : bzeil_typ*
-*                   Wertebereich : Pointer auf Blockzeilenliste
+*                   Typ          : bzeil_typ**
+*                   Wertebereich : Pointer auf Pointer auf Blockzeilenliste
 *                   Bedeutung    : Freizugebender Blocktext
 *
 *  Beschreibung : Die Speicherplatz fuer die uebergebene Liste und den in
-*                 ihr enthaltenen Text wrd freigegeben.
+*                 ihr enthaltenen Text wrd freigegeben. Der Pointer auf
+*                 die Blockzeilenliste wird anschlieáend auf NULL gesetzt
+*                 um zu kennzeichnen, daá die Liste nicht mehr existiert.
 *
 *****************************************************************************/
 
 void block_free(blockstart)
-bzeil_typ *blockstart;
+bzeil_typ **blockstart;
 {
   /* *** interne Daten *** */
   register bzeil_typ *hilf;  /* Zeiger auf naechste Blockzeile */
 
-  while(blockstart)
+  while(*blockstart)
   {
-    hilf = blockstart->next;
-    line_free(blockstart->text); /* Speicher der Zeile freigeben */
-    free(blockstart);            /* Zeilenstruktur freigeben     */
-    blockstart = hilf;
+    hilf = (*blockstart)->next;
+    line_free((*blockstart)->text); /* Speicher der Zeile freigeben */
+    free(*blockstart);              /* Zeilenstruktur freigeben     */
+    *blockstart = hilf;
   }
 }
 
@@ -65,6 +67,10 @@ bzeil_typ *blockstart;
 *
 *  Beschreibung : Falls Bockanfang und Blockende definiert sind und der Block-
 *                 anfang vor dem Blockende liegt, wird TRUE zurueckgegeben.
+*                 Die Definiertheit von Blockanfang und Blockende wird anhand
+*                 der Zeileninformation entschieden, da die
+*                 Spalteninformation noch fr einen gesicherten rechteckigen
+*                 Block vonn”ten sein kann.
 *                 Sonst wird FALSE zurueckgegeben.
 *
 *****************************************************************************/
@@ -567,10 +573,11 @@ int bl_to_fil()
     {
       print_stat(PROMPT_WORKING);
       /* Blocktext aus dem Text kopieren */
-      akt_winp->block.bstart = akt_winp->block.typ == BT_NORMAL? save_normal():save_rechteck();
+      akt_winp->block.bstart = akt_winp->block.typ == BT_NORMAL?
+					       save_normal():save_rechteck();
       schr_block(akt_winp->block.bstart,f); /* und in die Ausgabe-Datei schreiben */
       fclose (f);                           /* Ausgabedatei schlieáen */
-      block_free(akt_winp->block.bstart);   /* Block freigeben */
+      block_free(&akt_winp->block.bstart);  /* Block freigeben */
 
       sprintf(dummy,"%s <%s >%s",filt_name,fn_in,fn_out); /* Kommando erstellen */
       if(system(dummy) == -1) /* Shell starten */
@@ -623,7 +630,7 @@ int bl_to_fil()
     gotox(akt_winp->block.s_line);       /* Block muss an Position des alten */
     akt_winp->screencol = akt_winp->block.s_col; /* Blocks eingefuegt werden */
     ret = akt_winp->block.typ == BT_NORMAL?ins_normal(&hilf):ins_rechteck(&hilf);
-    block_free(hilf.bstart);   /* eingefuegten Block freigeben */
+    block_free(&hilf.bstart);   /* eingefuegten Block freigeben */
 
     /* Wurde der Block vor der Cursorposition eingefgt, dann Cursorzeile */
     /* um die L„nge des Blocks (in Zeilen) erh”hen */
@@ -678,7 +685,10 @@ char *line;
   FILE *f;          /* Filepointer fuer Tempor„re Dateien */
   int  ret = TRUE;  /* Returnwert der Funktion            */
   char *shell_name, /* Name des Kommandointerpreters      */
-       dummy[80],   /* String zum Zusammenbasteln der Kommandozeile */
+       dummy[10000],/* String zum Zusammenbasteln der Kommandozeile */
+#ifdef OS2
+       old_raw_mode,/* Flag zum Merken, ob Kbd raw war       */
+#endif
        fn_in [12],  /* Name der Temor„rren Datei fr Eingabe */
        fn_out[12];  /* Name der tempor„ren Datei fr Eingabe */
 
@@ -686,11 +696,19 @@ char *line;
 
   sprintf(dummy,"%s >%s",line, fn_out); /* Kommando erstellen */
   print_stat(PROMPT_WORKING);
+#ifdef OS2
+  old_raw_mode = is_kbd_raw();  /* merken, in welchem Zustand Tastatur war */
+#endif
   if(system(dummy) == -1) /* Shell starten */
   {
     clear_stat();
     print_err(PROMPT_ERRSHELL);
   }
+#ifdef OS2
+  /* system() hinterl„át Tastatur nicht im Raw-Mode. Also set_os2_raw
+     aufrufen, um den alten raw-Mode wiederherzustellen */
+  set_os2_raw(old_raw_mode);
+#endif
 
   /* Shell-Ausgabe wird als normaler Block eingefuegt */
   if(!(f = fopen(fn_out,"r")))  /* Ausgabedatei zum Lesen ”ffnen */
@@ -712,7 +730,7 @@ char *line;
 	akt_winp->block.s_line = akt_winp->block.e_line = -1;
 	pe_or(PROMPT_SHELINSRT);
       }
-    block_free(akt_winp->block.bstart);     /* Block freigeben    */
+    block_free(&akt_winp->block.bstart);     /* Block freigeben    */
     clear_stat();  /* shell fertig */
   } /* End of else kein Fehler beim ™ffnen der tmpot-Datei */
   unlink(fn_in);  /* Tempor„re Dateien wieder l”schen */

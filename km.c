@@ -107,7 +107,8 @@ char      *kom_names[MAX_COMM_ANZ] = /* Namen der Kommandos */
 	    "Verlassen ohne Abspeichern mit Loadfile",
 	    "Aktuelles Zeichen loeschen", "RegulÑre AusdrÅcke an/aus",
 	    "Passende Klammer finden", "Cursor in Bildschirmmitte",
-	    "Alle geÑnderten Dateien sichern" };
+	    "Alle geÑnderten Dateien sichern", "Absatz formatieren",
+	    "Automatischer Zeilenumbruch an/aus" };
 #else
 	  { "refresh","to beginning of line","to end of line",
 	    "half page up", "half page down","delete current character",
@@ -146,7 +147,8 @@ char      *kom_names[MAX_COMM_ANZ] = /* Namen der Kommandos */
 	    "quit with save and loadfile", "quit without save with loadfile",
 	    "delete current character", "regular expressions on/off",
 	    "goto matching parenthesis", "cursor to middle of window",
-	    "save all modified files" };
+	    "save all modified files", "reflow paragraph",
+	    "toggle automatic linebreak mode" };
 #endif
 
 #ifndef OWN_CURSES

@@ -19,8 +19,6 @@
 /*       - Mit Maus nach oben scrollen (msu)                    */
 /*       - Mit Maus nach unten scrollen (msd)                   */
 /*       - Maus-Routine (mouse_routine)                         */
-/*       - Maus-Routine fÅr Funktion ja_nein (jn_mouse_routine) */
-/*       - Mouse-Interrupt aktivieren/sperren (mouse_jn_init)   */
 /*       - Mouse-Interrupt aktivieren/sperren (set_mouse_int)   */
 /*       - Maus initialisieren (init_mouse)                     */
 /*                                                              */
@@ -52,10 +50,8 @@ typedef struct MEVENT   /* Nimmt das Mouse-Event aus der Event-Queue auf */
 #pragma pack(4)
 
 short int mouse_handle; /* Globale Variable enthÑlt den Mouse-Handle */
-TID       mouse_ThreadID, /* Hier steht die ID des Mouse-Threads */
-	  mouse_jn_ThreadID=0; /* Mouse-Thread fÅr ja_nein-Abfrage */
-char      mouse_jn_active = FALSE, /* Routine ja_nein aktiv ? */
-	  mouse_active = FALSE;    /* Soll Mouse_Thread laufen ? */
+TID       mouse_ThreadID; /* Hier steht die ID des Mouse-Threads */
+char      mouse_active = FALSE;    /* Soll Mouse_Thread laufen ? */
 
 #else
 
@@ -78,10 +74,6 @@ extern (*funktion[])(),
 extern short int mc_index;
 extern comm_typ *comm_feld;
 extern char highblockflag;
-
-int mouse_jn;         /* Variable fÅr Bedienung der Funktion ja_nein mit
-			 der Maus. Kann die Werte NO_KLICK, KLICK_RIGHT und
-			 KLICK_LEFT annehmen. */
 
 /******************************************************************************
 
@@ -629,7 +621,9 @@ void mouse_blend (mouse_type *m, int old_x, int old_y,
 	/* neu angezeigt werden. */
 	direction_dn = m->y >= old_y;
 	y = akt_winp->textline - akt_winp->ws_line;
-	for (i=m->y; direction_dn ? i >= old_y : i <= old_y;
+	for (i=m->y; direction_dn
+		     ? i >= old_y : 
+		     (i <= old_y && y+akt_winp->ws_line <= akt_winp->maxline);
 	     direction_dn ? i-- : i++)
 	{
 	  lineout (direction_dn ? y-- : y++);
@@ -649,8 +643,13 @@ void mouse_blend (mouse_type *m, int old_x, int old_y,
 	else /* beginnt Block oberhalb von Mausbewegungsbereich ? */
 	  if (akt_winp->block.s_line < first_l)
 	    first_l = akt_winp->block.s_line;
-	if (akt_winp->block.e_line > last_l)
-	  last_l = akt_winp->block.e_line;
+	if (first_l > akt_winp->maxline)      /* Stand Maus vorher unter */
+	   first_l = akt_winp->maxline;       /* Textende?               */
+	if (akt_winp->block.e_line > last_l)  /* Block endet unterhalb */
+	  last_l = akt_winp->block.e_line;    /* von Mausposition?     */
+	else
+	   if (last_l > akt_winp->maxline)    /* Maus unter Textende?      */
+	      last_l = akt_winp->maxline;     /* Dann nur bis zum Textende */
 	/* Jetzt liegt first_l und last_l im Fenster */
 	gotox (first_l);
 	y = akt_winp->textline - akt_winp->ws_line;
@@ -1164,135 +1163,27 @@ void mouse_routine(
     show_win(W_AKT);    /* Fenster neu zeichnen */
     hide_show(MOUSE_SHOW); /* Maus wieder anzeigen */
   }
-  switch(pos_to_button(m))
+  else  /* Wenn schon Fensterwechsel, dann nichts sonst tun. */
   {
-    case MOUSE_TEXT        : set_cursor_or_mark_block(m); break;
-    case MOUSE_KOPF        : mouse_movewin(m); break;
-    case MOUSE_SIZE        : mouse_sizewin(m); break;
-    case MOUSE_CLOSE       : mouse_win_zu(); break;
-    case MOUSE_TOG_SIZE    : mouse_tog_size(); break;
+    switch(pos_to_button(m))
+    {
+      case MOUSE_TEXT        : set_cursor_or_mark_block(m); break;
+      case MOUSE_KOPF        : mouse_movewin(m); break;
+      case MOUSE_SIZE        : mouse_sizewin(m); break;
+      case MOUSE_CLOSE       : mouse_win_zu(); break;
+      case MOUSE_TOG_SIZE    : mouse_tog_size(); break;
 
-    case MOUSE_SCROLL_UP   : msu(); break;
-    case MOUSE_SCROLL_DOWN : msd(); break;
-    case MOUSE_SCROLL_RIGHT: msr(); break;
-    case MOUSE_SCROLL_LEFT : msl(); break;
+      case MOUSE_SCROLL_UP   : msu(); break;
+      case MOUSE_SCROLL_DOWN : msd(); break;
+      case MOUSE_SCROLL_RIGHT: msr(); break;
+      case MOUSE_SCROLL_LEFT : msl(); break;
+    }
   }
-
 #ifdef OS2
   }
 #else
   asm pop  es;
   asm pop  ds;
-#endif
-}
-
-/******************************************************************************
-*
-* Funktion     : Maus-Routine fÅr Funktion ja_nein (jn_mouse_routine)
-* --------------
-*
-* Beschreibung : Diese Routine wird angesrpugen, wenn mit mouse_jn_init die
-*                Maus aktiviert wurde und das entsprechende Ereignis
-*                eingetreten ist. (DOS-Fall)
-*                Bei OS/2 wird diese Funktion als ein eigener Thread
-*                gestartet. FÅhrt ein Maus-Ereignis zum Setzen der Variablen
-*                mouse_jn, so wird der Thread beendet. Ansonsten mu· der
-*                Thread extern beendet werden (DosKillThread), falls
-*                die JN-Antwort von anderswo erhalten wurde.
-*
-*                Diese Funktion setzt dann gemÑ· dem gedrÅckten Mausknopf
-*                die globale Variable mouse_jn auf KLICK_LEFT bzw.
-*                KLICK_RIGHT. 
-*
-******************************************************************************/
-
-void jn_mouse_routine()
-{
-#ifdef OS2
-  mouse_type m;
-  short int wait = 0; /* Auf Mausereignis warten */
-
-  while (mouse_active && mouse_jn == NO_KLICK)
-  {
-    MouReadEventQue (&m, &wait, mouse_handle);
-    if (!m.time && !m.button_status) /* Kein Ereignis? Dann 10 ms warten */
-      DosSleep (10);
-    else
-      if (m.button_status & (MOUSE_BUT1 | MOUSE_BUT1_MOVE))
-      {
-/*      DosSleep(200);    eee ohne diese Zeile terminiert in einigen FÑllen
-			  der mouse_thread nicht: Wenn beispielsweise der
-			  Editor durch "Beenden ohne Sichern" verlassen
-			  wird, die Sicherheitsabfrage jedoch mit der Maus
-			  beantwortet wird, so hÑngt der mouse_thread
-			  ohne diese Zeile... */
-	mouse_jn = KLICK_LEFT;
-      }
-      else if (m.button_status & (MOUSE_BUT2 | MOUSE_BUT2_MOVE))
-	mouse_jn = KLICK_RIGHT;
-  }
-#else
-  int event; /* FÅr Ablage des eingetretenen Ereignisses */
-
-  asm push ds;
-  asm push es;
-  asm mov  bx,DGROUP;
-  asm mov  es,bx;
-  asm mov  ds,bx;
-  event = _AX;
-  mouse_jn = event & 8 ? KLICK_RIGHT : KLICK_LEFT;
-  asm pop  es;
-  asm pop  ds;
-#endif
-}
-
-/******************************************************************************
-*
-* Funktion     : Mouse-Interrupt aktivieren/sperren (mouse_jn_init)
-* --------------
-*
-* Parameter    : on_off    :
-*                  Typ          : int
-*                  Wertebereich : TRUE, FALSE
-*                  Bedeutung    : TRUE : jn_mouse_routine aktivieren
-*                                 FALSE: jn_mouse_routine deaktivieren
-*
-* Beschreibung : Mittels des Mausinterrupts 51, Funktion 12 wird die
-*                Funktion jn_mouse_routine als anzuspringende Funktion
-*                eingetragen. Die Event-Mask wird auf rechten Knopf +
-*                linken Knopf gesetzt, falls aktiviert wird, auf 0 sonst.
-*
-******************************************************************************/
-
-void mouse_jn_init(on_off)
-int on_off;
-{
-#ifdef OS2
-  mouse_jn_active = on_off; /* mouse_jn soll auch in der "normalen"
-			       Mouse-Kontrollschleife korrekt gesetzt
-			       werden. */
-  if (on_off)
-  {
-    mouse_jn = NO_KLICK;
-    /* eigener Thread fÅr Maus-JN */
-    mouse_jn_ThreadID = _beginthread (jn_mouse_routine, 0, 20000, 0);
-  }
-  /* else-part nicht nîtig, da jn_mouse_routine sich selbst beendet, wenn
-     mouse_jn_active=FALSE festgestellt wird. */
-#else
-  union  REGS  regs;
-  struct SREGS sregs;
-
-  /* Mauszeiger lîschen, falls Maus demaskiert wird, sonst */
-  /* Mauszeiger anzeigen */
-  if(on_off) /* Bei Initialisierung: */
-    mouse_jn = NO_KLICK; /* Variable initialisieren */
-  hide_show(on_off ? MOUSE_SHOW : MOUSE_HIDE);
-  regs.x.ax  = 12;
-  regs.x.cx  = on_off ? MOUSE_MASK : 0;
-  regs.x.dx  = FP_OFF(jn_mouse_routine);
-  sregs.es   = FP_SEG(jn_mouse_routine);
-  int86x(51,&regs,&regs,&sregs);
 #endif
 }
 
@@ -1374,24 +1265,11 @@ void mouse_thread ()
     if (event.time || event.button_status) /* Ereignis ? */
     {
       sleep_time = 0;      /* Wartezeit wieder von 0 beginnen lassen */
-      if (mouse_jn_active)
-      { /* Nur das Flag mouse_jn korrekt besetzen, dazu mu· nicht der
-	   Semaphor angefordert werden. */
-	if (event.button_status & (MOUSE_BUT1 | MOUSE_BUT1_MOVE))
-	  mouse_jn = KLICK_LEFT;
-	if (event.button_status & (MOUSE_BUT2 | MOUSE_BUT2_MOVE))
-	  mouse_jn = KLICK_RIGHT;
-      }
-      else /* mouse_jn nicht aktiv, also "richtiges" Kommando ausfÅhren */
-      {
-	DosRequestMutexSem (sem_handle, -1); /* ohne Timeout auf Semaphor warten */
-	mouse_routine (&event);
-	DosReleaseMutexSem (sem_handle);     /* Semaphor wieder freigeben */
-      }
+      DosRequestMutexSem (sem_handle, -1); /* ohne Timeout auf Semaphor warten */
+      mouse_routine (&event);
+      DosReleaseMutexSem (sem_handle);     /* Semaphor wieder freigeben */
     }
   }
-  if (mouse_jn_ThreadID)
-    DosWaitThread (&mouse_jn_ThreadID, DCWW_WAIT);
   MouClose (mouse_handle);
 }
 #endif

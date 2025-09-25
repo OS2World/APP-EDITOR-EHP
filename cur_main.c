@@ -21,6 +21,8 @@
 *              overwrite (Fensterinhalt fÅr öberlappung mit Blanks kopieren)
 *              mvcur (Cursor an absolute Position bewegen)
 *              set_videomode (Anpassung des bildschirmmodus)
+*              set_os2_raw (Tastatur unter OS/2 in Raw-Mode setzen)
+*              is_kbd_raw (Raw-Mode der Tastatur unter OS/2 testen)
 *              initscr (Curses initialisieren)
 *              endwin (Curses beenden)
 *              wnoutrefresh (Window-Image ins VSI kopieren)
@@ -65,13 +67,22 @@ struct VioMode { short int length;
 
 extern char *reserve_mem();
 
-WINDOW *stdscr,           /* Bildschirmgro·es Standardfenster */
-       *curscr,           /* Aktueller Bildschirminhalt */
-       *last_win;         /* Zuletzt refreshtes Window */
-short  int *vsi,          /* Virtueller Bildschirminhalt */
-       *PH_SC,            /* Startadresse des Bildschirmram */
-       LINES=25,          /* Anzahl der sichbaren Bildschirmzeilen */
-       COLS=80;           /* Anzahl der sichbaren Bildschirmspalten */
+WINDOW *stdscr,              /* Bildschirmgro·es Standardfenster */
+       *curscr,              /* Aktueller Bildschirminhalt */            
+       *last_win;            /* Zuletzt refreshtes Window */             
+short  int *vsi,             /* Virtueller Bildschirminhalt */           
+       *PH_SC,               /* Startadresse des Bildschirmram */        
+       LINES=25,             /* Anzahl der sichbaren Bildschirmzeilen */ 
+       COLS=80;              /* Anzahl der sichbaren Bildschirmspalten */
+short int A_NORMAL    = 0;   /* Keine Attribute */
+short int A_STANDOUT  = 2;   /* GrÅn */
+short int A_UNDERLINE = 4;   /* Rot */
+short int A_BLINK     = 128; /* Binken */
+short int A_DIM       = 8;   /* Nur intense */
+short int A_BOLD      = 2;   /* GrÅn */
+short int A_INVIS     = 136; /* Intense auf Intense */
+short int STD_ATTR    = 7;   /* Standard-Darstellung grau auf schwarz */
+
 #ifdef OS2
 struct VioMode old_videomode; /* Videomodus beim Aufruf des Editors */
 #else
@@ -859,6 +870,12 @@ void set_videomode()
 * Funktion     : Tastatur in Raw-Mode versetzen (set_os2_raw)
 * --------------
 *
+* Parameter    : raw_on      :
+*                  Typ          : char
+*                  Wertebereich : TRUE, FALSE
+*                  Bedeutung    : Gibt an, ob der raw-Mode ein- oder ausge-
+*                                 schaltet werden soll.
+*
 * Beschreibung : Es wird mittels der OS/2 Kernel-Aufrufe KbdGetStatus
 *                und KbdSetStatus die Tastatur in den Raw-Mode versetzt.
 *                Dadurch kînnen mittels KbdCharIn auch <CTRL>-S und <CTRL>-C
@@ -874,6 +891,7 @@ void set_os2_raw (char raw_on)
 				       nls,
 				       shift;   } kbst;
 
+  kbst.length = 10;
   KbdGetStatus (&kbst, 0);
   if (raw_on)
     kbst.state = (kbst.state | 4) & ~8;
@@ -882,7 +900,24 @@ void set_os2_raw (char raw_on)
   KbdSetStatus (&kbst, 0);
 }
 
-void show_kbd_mode()
+/******************************************************************************
+*
+* Funktion     : Abfragen, ob Tastatur im Raw-Mode ist (is_kbd_raw)
+* --------------
+*
+* Ergebnis     :
+*                  Typ          : int
+*                  Wertebereich : TRUE, FALSE
+*                  Bedeutung    : TRUE: Kbd ist im Raw-Mode;
+*                                 FALSE: Kbd ist nicht im Raw-Mode
+*
+* Beschreibung : Es wird mittels des OS/2 Kernel-Aufrufs KbdGetStatus
+*                geprÅft, ob sich die Tastatur im Raw-Mode befindet.
+*                Ist das der Fall, so wird TRUE zurÅckgegeben, sonst FALSE.
+*
+******************************************************************************/
+
+char is_kbd_raw()
 {
   struct KbdState { unsigned short int length,
 				       state,
@@ -891,7 +926,7 @@ void show_kbd_mode()
 				       shift;   } kbst;
 
   KbdGetStatus (&kbst, 0);
-  printf("KbdStatus ist %d\n", kbst.state & 12);
+  return (kbst.state & 4) != 0;
 }
 #endif
 

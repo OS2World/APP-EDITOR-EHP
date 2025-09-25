@@ -6,10 +6,13 @@
 /*              - do_control (Kontrollzeichen in Text einfg.)   */
 /*              - hndl_insert (Insert-Teil von do_inschar)      */
 /*              - hndl_overwrite (Overwrite-Teil von do_inschar)*/
+/*              - do_linebreak (automatischer Zeilenumbruch)    */
 /*              - do_inschar (Zeichen in Text einfuegen)        */
 /*              - do_tog_tkm (Tabkomprimierungsmodus togglen)   */
 /*              - do_tog_bak (Backupfileerzeugungsmodus togglen)*/
 /*              - do_tog_ai (Autoindentmodus togglen)           */
+/*              - do_tog_lb (Linebreakmodus togglen)            */
+/*              - do_togregex (RegulÑre AusdrÅcke togglen)      */
 /*              - do_movewin (Fensterbewegung kontrollieren)    */
 /*              - do_toggle_size (Fenster auf gespeicherte Gr.) */
 /*              - do_sizewin (Fenstergroessenanpassung kontr.)  */
@@ -40,7 +43,9 @@
 /*              - do_swname (Window gemaess Name suchen)        */
 /*              - do_newname (Datei unter neuem Namen speichern)*/
 /*              - do_macro (Macro definieren/ausfuehren)        */
-/*              - do_restline (geloeschte Zeile wiederherstelen)*/
+/*              - do_restline (gelîschte Zeile wiederherstellen)*/
+/*              - do_saveall (alle geÑnderten Dateien sichern)  */
+/*              - do_reflow (Absatz neu ausrichten)             */
 /*              - auswertung (Tastendruck auswerten)            */
 /****************************************************************/
 
@@ -66,17 +71,19 @@ extern char *on_off[], /* Hilfstexte */
 		       /* fuer Togglen der globalen Flags */
 	    helpflag;  /* Flag: Hilfstexte anzeigen       */
 
-extern void do_refresh(), do_bol(),do_eol(),do_halfup(),do_halfdn(),do_delete(),
-	    do_backspace(),do_home(),do_nothome(),do_insovr(),do_textbeginn(),
-	    do_eot(),do_del_word(),do_wleft(),do_wright(),do_right(),do_left(),
-	    do_up(),do_down(),do_pgup(),do_pgdn(),do_newline(),do_delline(),
-	    ueberschreiben(),do_schreib_file(),quit(),do_help(),laden(),
-	    do_win_zu(),do_goto(),do_ende(),do_find(),do_replace(),
-	    do_underline(),do_z_hoch(),do_z_runter(),do_z_oben(),
-	    do_z_mitte(),do_z_unten(),do_deleol(),do_repfr(),do_repfr(),
-	    do_join(),do_open(),do_tab(),do_settab(),do_hopen(),
-	    do_backtab(),do_endemit(),quitmit(),do_find(), do_repfr(),
-	    do_replace(),do_matchpar(),do_middle();
+extern int  do_newline();
+extern void do_refresh(), do_bol(), do_eol(), do_halfup(), do_halfdn(),
+	    do_delete(), do_backspace(), do_home(), do_nothome(), 
+	    do_insovr(), do_textbeginn(), do_eot(), do_del_word(), 
+	    do_wleft(), do_wright(), do_right(), do_left(), do_up(), 
+	    do_down(), do_pgup(), do_pgdn(), do_delline(),
+	    ueberschreiben(), do_schreib_file(),quit(), do_help(),laden(), 
+	    do_win_zu(), do_goto(), do_ende(), do_find(), do_replace(), 
+	    do_underline(), do_z_hoch(), do_z_runter(), do_z_oben(), 
+	    do_z_mitte(), do_z_unten(), do_deleol(), do_repfr(), do_repfr(), 
+	    do_join(), do_open(), do_tab(), do_settab(), do_hopen(), 
+	    do_backtab(), do_endemit(),quitmit(), do_find(), do_repfr(), 
+	    do_replace(), do_matchpar(), do_middle();
 
 
 /*****************************************************************************
@@ -140,7 +147,7 @@ int *restn;
       return(FALSE);             /* geben und Funktion beenden      */
     }
     if (akt_winp->autoindflag)   /* Eventuell aufgespaltene Zeile   */
-      indent_line();             /* korrekt einruecken              */
+      indent_line(TRUE);         /* korrekt einruecken              */
     if (akt_winp->alinep->text)  /* neue Zeile nicht leer?  */
     {
       up();                 /* in alte Zeile, da dort noch Platz */
@@ -233,7 +240,7 @@ int *restn;
   {
     if(akt_winp->underflag ^ ul_char()) /* falls Zeichen verschiedene */
 					/* Laengen haben */
-      u_diff = TRUE;  /* Merken, da· 2 Zeichen unterschiedlich waren */
+      u_diff = TRUE;  /* Merken, daa 2 Zeichen unterschiedlich waren */
     anz_del++;        /* Anzahl zu lîschender Zeichen inkrementieren */
   } while (--(*restn) && right()); /* Solange wiederholen, bis alle */
 		       /* Zeichen geprÅft oder Zeilenende erreicht */
@@ -250,6 +257,70 @@ int *restn;
 
 /*****************************************************************************
 *
+*  Funktion       Auto. Zeilenumbruch durchfÅhren (do_linebreak)
+*  --------
+*
+*  Ergebnis     :
+*                   Typ         : int
+*                   Wertebereich: TRUE, FALSE
+*                   Bedeutung   : TRUE: hat geklappt
+*                                 FALSE: hat nicht geklappt
+*
+*  Beschreibung : Von der aktuellen Position aus wird das nÑchste
+*                 Leerzeichen links vom Cursor gesucht. Wenn kein
+*                 Leerzeichen gefunden wird, wird FALSE zurÅckgegeben
+*                 und der Cursor wieder an seine alte Position gestellt.
+*                 Ansonsten wird der Cursor rechts des gefundenen
+*                 Leerzeichens positioniert und ein Zeilenumbruch
+*                 durchgefÅhrt. Falls Autoindent aktiv ist, wird die neue
+*                 Zeile wie bei Reflowing eingerÅckt.
+*
+*****************************************************************************/
+
+int do_linebreak()
+{
+  int x_r = akt_winp->screencol,  /* alte Cursorspalte merken   */
+      result = TRUE,              /* RÅckgabewert               */
+      new_sc = x_r,               /* neue Cursorspalte          */
+      old_sc;                     /* Cursorspalte am Wortanfang */
+
+  /* das nÑchste Blank zur linken suchen. */
+  do
+    left();
+  while (akt_zeichen() != ' ' && akt_winp->screencol > 0);
+  if (akt_zeichen() != ' ')    /* am linken Rand angekommen, und       */
+    result = FALSE;            /* am Zeilenanfang kein Blank,          */
+			       /* Dann FALSE zurÅckgeben               */
+			       /* scrollen, falls nîtig                */
+  else
+  { /* Cursor steht jetzt auf einem Blank, rechts davon beginnt Wort */
+    right();                     /* auf Wortanfang stellen */
+    old_sc = akt_winp->screencol;
+    if (old_sc < akt_winp->ws_col)  /* Cursor links vom Rand, dann scrollen */
+    {
+      akt_winp->ws_col = old_sc;
+      show_win (W_AKT);
+    }
+    if (do_newline())              /* klappt ZeileneinfÅgen? */
+    {
+      /* Dann neue Cursorspalte entsprechend anpassen, */
+      if (akt_winp->insflag)       /* falls Insert-Mode aktiv war */
+      {
+	akt_winp->screencol = new_sc - old_sc + akt_winp->screencol;
+	adapt_screen (1);
+      }
+    }
+    else  /* new_line schlug fehl */
+    {
+      akt_winp->screencol = x_r; /* Cursor an alte Position fahren */
+      result = FALSE;
+    }
+  }
+  return result;
+}
+
+/*****************************************************************************
+*
 *  Funktion       Zeichen in Text einfuegen (do_inschar)
 *  --------
 *
@@ -261,11 +332,14 @@ int *restn;
 void do_inschar()
 {
   /* *** interne Daten und Initialisierung *** */
-  short    int input [INS_BUFF_LEN]; /* lokaler Eingabepuffer */
-  int          restn; /* Anzahl noch einzufuegender Zeichen   */
-  register int n=0,   /* Index in lokalen Eingabepuffer       */
-	       nmax,  /* Anzahl eingelesener Zeichen          */
-	       hilf;  /* Zum Einlesen einer Tastenkombination */
+  short    int input [INS_BUFF_LEN]; /* lokaler Eingabepuffer        */
+  int          restn; /* Anzahl noch einzufuegender Zeichen          */
+  char         scrolled,       /* Gibt an, ob enter_char beim        */
+		      /* Anzeigen gescrollt hat                      */
+	       line_broken;    /* Gibt an, ob Linebreak stattfand    */
+  register int n=0,   /* Index in lokalen Eingabepuffer              */
+	       nmax,  /* Anzahl eingelesener Zeichen                 */
+	       hilf;  /* Zum Einlesen einer Tastenkombination        */
 
   nodelay (akt_winp->winp,TRUE); /* Tastatur soll -1 liefern, wenn keine */
   do                             /* Taste gedrueckt wurde                */
@@ -274,21 +348,59 @@ void do_inschar()
   /* Wenn Puffer noch nicht voll, Tastenkombination lesen. Wenn es ein */
   /* Zeichen ist, Aktion wiederholen.                                  */
 
-  nodelay (akt_winp->winp,FALSE); /* Fkt. taste soll auf Taste warten */
-  lastcode = hilf; /* Letzte gelesene Tastenkombination merken */
+  nodelay (akt_winp->winp,FALSE); /* Fkt. taste soll auf Taste warten  */
+  if (hilf != mc_index+1)  /* Falls 'zu weit' gelesen wurde:           */
+    lastcode = hilf;       /* Letzte gelesene Tastenkombination merken */
   nmax = restn = n; /* Variablen anhand des "Pufferfuellstandes" initial. */
   do
   {
+    scrolled    = FALSE;
+    line_broken = FALSE;
     if (akt_winp->insflag)      /* Nur im Insert-Mode einfuegen */
     {
       if(!hndl_insert(&restn))  /* Einfuegung durchfuehren */
 	return;
     }
-    else                          /* Sonst Ueberschreiben durchfuehren */
+    else                          /* Sonst Ueberschreiben durchfuehren     */
       if(!hndl_overwrite(&restn)) /* Klappte Einfuegen oder Ueberschreiben */
-	return;                   /* nicht, dann Funktion verlassen */
-    while (enter_char((char) input [nmax-n]) /* Zeichen in Zeile einsetzen */
-    && --n>restn); /* Index in input anpassen */
+	return;                   /* nicht, dann Funktion verlassen        */
+    do
+    {
+      enter_char((char) input [nmax-n],      /* Zeichen in Zeile einsetzen */
+		 &scrolled, 
+		 scrolled || line_broken ? PUT
+					 : akt_winp->insflag?INSERT:PUT,
+		 akt_winp->linebreak); /* bei akt. Linebreak soll     */
+			     /* enter_char nur melden, da·            */
+			     /* Scrolling nîtig ist, nicht selbst scr.*/
+      if (akt_winp->linebreak && scrolled)
+      {
+	/* Beachte folgendes zum Thema scrolled und line_broken:
+	   Es wird ein Zeilenumbruch durchgefÅhrt. In der neuen Zeile sind,
+	   falls mehrere Zeichen im Puffer standen, bereits die Stellen fÅr
+	   die einzufÅgenden Zeichen vorgesehen, werden also vom do_newline
+	   in do_linebreak angezeigt. Diese mÅssen dann Åbeschrieben werden
+	   und dÅrfen nicht nach rechts verschoben werden. Es mu· also wie 
+	   nach dem Scrollen PUT verwendet werden. Darum wird beim Aufruf von
+	   enter_char auch line_broken berÅcksichtigt. scrolled kann also 
+	   zurÅckgesetzt werden, was bewirkt, da· nicht erneut nach jedem 
+	   eingetragenen Zeichen ein Zeilenumbruch durchgefÅhrt wird. Erst
+	   wenn tatsÑchlich das nÑchste mal gescrollt werden wÅrde, wird ein
+	   Zeilenumbruch ausgefÅhrt.
+	*/
+	line_broken = TRUE;
+	scrolled    = FALSE;
+	if (!do_linebreak())      /* Klappt Linebreaking nicht? Dann       */
+	{                         /* doch scrollen                         */
+	  akt_winp->ws_col += EC_SCROLL_WIDTH < akt_winp->dx ?
+			      EC_SCROLL_WIDTH : akt_winp->dx / 4 + 1;
+	  if(akt_winp->ws_col >= MAXLENGTH) /* Zu weit, dann eins zurueck */
+	    akt_winp->ws_col = MAXLENGTH-1;
+	  show_win(W_AKT);  /* Fensterinhalt neu anzeigen */
+	  fill_buff(); /* aktuelle Zeile wieder in Puffer kopieren */
+	}
+      }
+    } while (--n>restn);  /* Index in input anpassen */
   } while (restn); /* Falls noch Zeichen einzufuegen sind, Aktion wiederholen */
   setz_cursor(W_AKT);   /* Cursor an richtige Position setzen */
 }
@@ -299,7 +411,7 @@ void do_inschar()
 *  --------
 *
 *  Beschreibung : Der Status des Tab-Komprimierungs-modus wird invertiert.
-*                 Au·erdem wird der Text als geÑndert markiert, damit er
+*                 Auaerdem wird der Text als geÑndert markiert, damit er
 *                 abgespeichert wird. Das ist erforderlich, da sonst die
 *                 Datei evtl. das alte Format beibehÑlt.
 *
@@ -343,6 +455,21 @@ void do_tog_ai()
 {
   akt_winp->autoindflag ^= TRUE;  /* Autoindentflag togglen */
   setz_cursor(W_AKT);                  /* Cursor wieder an richtige Position setzen */
+}
+
+/*****************************************************************************
+*
+*  Funktion       Autoindent-modus toggeln (do_tog_lb)
+*  --------
+*
+*  Beschreibung : Der Status des Linebreak-modus wird invertiert.
+*
+*****************************************************************************/
+
+void do_tog_lb()
+{
+  akt_winp->linebreak^= TRUE;
+  setz_cursor(W_AKT);          
 }
 
 /*****************************************************************************
@@ -621,6 +748,22 @@ void do_swnum()
     setz_cursor(W_AKT);
 }
 
+void check_and_copy_repeat_buff (old_ksi, new_ksi)
+int old_ksi, *new_ksi;
+{
+   (*new_ksi)++;  /* new_ksi zeigt jetzt auf den zu fÅllenden Puffer */
+   if (old_ksi != *new_ksi-1)
+   {
+      /* get_comstr() hat beim Einlesen des Repeat-Kommandos wieder Puffer
+	 freigegeben. Das eingelesene Repeat-Kommando mu· entsprechend 
+	 umgepointert werden.
+      */
+      puff_feld[*new_ksi].begin = puff_feld[old_ksi+1].begin;
+      puff_feld[*new_ksi].end   = puff_feld[old_ksi+1].end;
+   }
+}
+
+
 /*****************************************************************************
 *
 *  Funktion       Funktion mehrmals ausfuehren (do_repeat)
@@ -636,8 +779,9 @@ void do_swnum()
 void do_repeat()
 {
   /* *** interne Daten *** */
-  char zahl_str[6];  /* String fuer Anzahl der Wiederholungen */
-  int  i;            /* Stringinhalt als Integer */
+  char zahl_str[6];        /* String fuer Anzahl der Wiederholungen */
+  int  i,                  /* Stringinhalt als Integer */
+       old_ksi = ks_index; /* Zwischenspeicher altes ks_index */
 
   if(ks_index < MACRO_NEST_DEPTH - 1) /* Testen, ob noch ein Puffer frei */
   {                                   /* Wenn ja, Wiederholungsanzahl einlesen */
@@ -646,14 +790,21 @@ void do_repeat()
     clear_stat();                     /* Statuszeile wieder loeschen */
     if ((i=atoi(zahl_str)) > 0)       /* String nach Integer, muss > 0 sein */
     {
-      /* Mit get_comstr wird eine Befehlsfolge von der Tastatur eingelesen */
-      /* und im ersten freien Puffer (ks_index+1) abgelegt.                */
-      get_comstr(&puff_feld[ks_index+1].begin,&puff_feld[ks_index+1].end);
-      if(puff_feld[ks_index+1].begin)    /* keine Leereingabe? */
+      /* Mit get_comstr wird eine Befehlsfolge von der Tastatur eingelesen
+	 und im ersten freien Puffer (ks_index+1) abgelegt. Nun kann es aber 
+	 sein, da· nach dem Einlesen des letzten Repeat-Kommando-Zeichens 
+	 andere Puffer freigegeben werden. ks_index nach get_comstr mu· also 
+	 nicht mit ks_index vor get_comstr Åbereinstimmen. Ggf. mu· also der 
+	 neue Puffer in einen mit kleinerem Index kopiert werden.
+      */
+      get_comstr(&puff_feld[old_ksi+1].begin,&puff_feld[old_ksi+1].end);
+      if(puff_feld[old_ksi+1].begin)    /* keine Leereingabe? */
       {
-	if(ks_index >=0)              /* Wenn schon ein Puffer aktiv, dann  */
+	if(ks_index >= 0)              /* Wenn noch ein Puffer aktiv, dann  */
 	  puff_feld[ks_index].current = keystack; /* Position darin merken  */
-	keystack = puff_feld[++ks_index].begin; /* Position im neuen setzen */
+	check_and_copy_repeat_buff (old_ksi, &ks_index); /* Puf. evtl. kop. */
+				  /* Dabei ks_index auf neuen Puffer setzen */
+	keystack = puff_feld[ks_index].begin;   /* Position im neuen setzen */
 		    /* Puffer soll nach Ausfuehrung der Wiederholung wieder */
 	puff_feld[ks_index].free_flag = TRUE;         /* freigegeben werden */
 	e_keystack = puff_feld[ks_index].end; /* Pufferende merken          */
@@ -684,6 +835,9 @@ void do_repeat()
 
 void do_blstart()
 {
+  /* Ein noch gespeicherter Block wird durch Setzen der Position gelîscht. */
+  if (akt_winp->block.bstart)
+     block_free(&akt_winp->block.bstart);
   akt_winp->block.s_line = akt_winp->textline;  /* Zeile und Spalte als Block- */
   akt_winp->block.s_col = akt_winp->screencol;  /* eintragen */
   if(highblockflag)                    /* Falls Block gehighlighted sein soll, */
@@ -705,6 +859,9 @@ void do_blstart()
 
 void do_blnormend()
 {
+  /* Ein noch gespeicherter Block wird durch Setzen der Position gelîscht. */
+  if (akt_winp->block.bstart)
+     block_free(&akt_winp->block.bstart);
   akt_winp->block.e_line = akt_winp->textline; /* Zeile und Spalte als Block- */
   akt_winp->block.e_col = akt_winp->screencol; /* ende eintragen              */
   akt_winp->block.typ = BT_NORMAL;             /* Blocktyp eintragen          */
@@ -727,6 +884,9 @@ void do_blnormend()
 
 void do_blrechtend()
 {
+  /* Ein noch gespeicherter Block wird durch Setzen der Position gelîscht. */
+  if (akt_winp->block.bstart)
+     block_free(&akt_winp->block.bstart);
   akt_winp->block.e_line = akt_winp->textline;  /* Aktuelle Zeile und Spalte */
   akt_winp->block.e_col = akt_winp->screencol;  /* als Blockende eintragen   */
   akt_winp->block.typ = BT_RECHTECK;            /* Blocktyp eintragen        */
@@ -764,7 +924,9 @@ void do_blunmark()
 *
 *  Beschreibung : Falls ein Block markiert ist, wird in Abhaengigkeit vom Typ
 *                 der Block geloescht, die Cursor- und Bildschirmposition an-
-*                 gepasst und evtl. der Bildschirm neu gezeichnet.
+*                 gepasst und evtl. der Bildschirm neu gezeichnet. Vor dem
+*                 Lîschen wird der Block mit save_{normal|rechteck} in
+*                 akt_winp->block->{bstart|laenge} eingetragen.
 *
 *****************************************************************************/
 
@@ -776,9 +938,13 @@ void do_blweg()
     /* eingetragen */
     akt_winp->block.laenge = akt_winp->block.e_line-akt_winp->block.s_line;
     if (akt_winp->block.typ == BT_RECHTECK)   /* Abhaengig vom Blocktyp wird */
-      del_rechteck();                         /* entweder del_rechteck oder  */
-    else                                      /* del_normal aufgerufen       */
+    {                                         /* entweder del_rechteck oder  */
+      akt_winp->block.bstart = save_rechteck(); /* del_normal aufgerufen     */
+      del_rechteck();                         
+    }
+    else                                      
     {
+      akt_winp->block.bstart = save_normal();
       del_normal();
       if (akt_winp->textline < akt_winp->ws_line)  /* Falls Cursor durch das  */
 	akt_winp->ws_line = akt_winp->textline;    /* Loeschen des Blocks     */
@@ -807,19 +973,23 @@ void do_blcopy()
   /* *** interne Daten *** */
   int ok;  /* Zwischenspeicher fuer Rueckgabewert der Insert-Funktionen */
 
-  if (block_defined())  /* Nur ausfuehren, falls ein Block markiert ist */
+  /* Nur ausfuehren, falls ein Block markiert oder der Blocktext noch */
+  /* vorhanden ist */
+  if (block_defined() || akt_winp->block.bstart) 
   {
     if (akt_winp->block.typ == BT_RECHTECK)     /* Abhaengig vom Blocktyp */
     {                                           /* entweder save_rechteck */
-      akt_winp->block.bstart = save_rechteck(); /* und ins_rechteck auf-  */
-      ok = ins_rechteck(&akt_winp->block);      /* rufen oder             */
+      if (!akt_winp->block.bstart)              /* und ins_rechteck auf-  */
+	akt_winp->block.bstart = save_rechteck(); /* rufen oder           */
+      ok = ins_rechteck(&akt_winp->block);      
     }
     else
-    {
-      akt_winp->block.bstart = save_normal();   /* save_normal und ins_normal */
-      ok = ins_normal(&akt_winp->block);        /* aufrufen */
+    {                                           
+      if (!akt_winp->block.bstart)
+	akt_winp->block.bstart = save_normal(); /* save_normal und ins_normal */
+      ok = ins_normal(&akt_winp->block);        /* aufrufen */                 
     }
-    block_free(akt_winp->block.bstart);         /* Blocktext freigeben        */
+    block_free(&akt_winp->block.bstart);        /* Blocktext freigeben        */
     show_win(W_AKT);                                 /* Fensterinhalt neu anzeigen */
     if(!ok)                                     /* Falls beim Einfuegen ein   */
       print_err(B_SIZE_ERRTEXT);                /* Fehler auftrat, Meldung    */
@@ -842,7 +1012,7 @@ void do_blmove()
   int old_sc,  /* Zwischenspeicher fuer Spalte falls Einfuegen nicht klappt */
       old_tl;  /* Zwischenspeicher fuer Zeile falls Einfuegen nicht klappt */
 
-  if (block_defined()) /* Nur ausfuehren, wenn ein Block maekiert ist */
+  if (block_defined()) /* Nur ausfuehren, wenn ein Block markiert ist */
   {
     if (akt_winp->block.typ == BT_RECHTECK)  /* Blocktyp ermitteln */
     {
@@ -861,6 +1031,7 @@ void do_blmove()
       }
       else
 	show_win(W_AKT); /* Klappte Einfuegen, dann Fensterinhalt neu anzeigen */
+      block_free(&akt_winp->block.bstart);       /* Blocktext freigeben */
     }
     else                                /* Normaler Block: */
       if (akt_winp->maxline + 2 < MAX_ANZ_LINES) /* Test ob genug Zeilen frei */
@@ -873,10 +1044,10 @@ void do_blmove()
 	if (akt_winp->screencol < akt_winp->ws_col)  /* ausserhalb des Fensters */
 	  akt_winp->ws_col = akt_winp->screencol;    /* steht, Fenster anpassen */
 	show_win(W_AKT);                             /* Fensterinhalt neu anzeigen */
+	block_free(&akt_winp->block.bstart);         /* Blocktext freigeben        */
       }
       else       /* Waren nicht genuegend Zeilen frei, Fehlermeldung ausgeben */
 	print_err(B_SIZE_ERRTEXT);
-    block_free(akt_winp->block.bstart);   /* Blocktext freigeben */
   }
 }
 
@@ -897,7 +1068,7 @@ void do_blcut()
   if (block_defined())      /* Nur ausfuehren, falls ein Block definiert ist */
   {
     if(global_block.bstart) /* Steht schon ein Block im Paste-Puffer, muss */
-      block_free(global_block.bstart);       /* dieser freigegeben werden. */
+      block_free(&global_block.bstart);      /* dieser freigegeben werden. */
     if (akt_winp->block.typ == BT_RECHTECK)  /* abhaengig vom Blocktyp die */
       akt_winp->block.bstart = save_rechteck(); /* entsprechende Funktion zum */
     else                                        /* Abspeichern des Blockes    */
@@ -942,7 +1113,7 @@ void do_blpaste()
       show_win(W_AKT);  /* Fensterinhalt neu anzeigen */
     else   /* Klappte des Einfuegen nicht, Fehlermeldung ausgeben. */
       print_err(B_SIZE_ERRTEXT);
-    block_free(hilf->bstart);     /* Blocktext des aktuellen Blocks freigeben */
+    block_free(&hilf->bstart);    /* Blocktext des aktuellen Blocks freigeben */
     free (hilf);                  /* Hilfsblockstruktur freigeben */
   }
 }
@@ -1010,7 +1181,7 @@ void do_blread()
 	  print_err(B_SIZE_ERRTEXT);       /* beim Einfuegen, dann Meldung */
 	else                               /* Sonst Fensterinhalt neu */
 	  show_win(W_AKT);                      /* anzeigen */
-	block_free(akt_winp->block.bstart);/* Blocktext freigeben */
+	block_free(&akt_winp->block.bstart);/* Blocktext freigeben */
 	fclose (f);
       }
       else                                 /* lies_block lieferte FALSE, */
@@ -1065,7 +1236,7 @@ void do_blwrite()
 	  akt_winp->block.bstart = save_normal();
 	schr_block(akt_winp->block.bstart,f); /* Block in offene Datei */
 	fclose (f);                  /* schreiben und Datei schliessen */
-	block_free (akt_winp->block.bstart);    /* Blocktext freigeben */
+	block_free (&akt_winp->block.bstart);   /* Blocktext freigeben */
       }
       else     /* Konnte Datei nicht geoeffnet werden, Fehlermeldung */
       {
@@ -1359,6 +1530,7 @@ void do_swname()
       if (koppel_win())   /* Soll Datei neu geladen werden, */
       {                   /* dann neues Fenster erzeugen */
 	akt_winp->filename = save_text(filename); /* Filenamen eintragen */
+	akt_winp->block.bstart = (bzeil_typ*) NULL;
 	if (!lies_file())  /* Datei in neues Fenster einlesen */
 	{
 	  gb_win_frei();   /* Klappte das nicht, Fenster wieder loeschen, */
@@ -1485,25 +1657,49 @@ void do_saveall()
   show_win(W_AKT);
 }
 
-void (*funktion [])() = {do_refresh, do_bol,do_eol,do_halfup,do_halfdn,do_delete,
-			 do_backspace,do_home,do_nothome,do_insovr,do_textbeginn,
-			 do_eot,do_del_word,do_wleft,do_wright,do_right,do_left,
-			 do_up,do_down,do_pgup,do_pgdn,do_newline,do_delline,
-			 ueberschreiben,do_schreib_file,quit,do_control,do_help,
-			 do_movewin,do_sizewin,do_swnext,do_swprev,do_swnum,
-			 laden,do_win_zu,do_goto,do_ende,do_find,do_replace,
-			 do_underline,do_z_hoch,do_z_runter,do_z_oben,
-			 do_z_mitte,do_z_unten,do_deleol,do_toggle_size,
-			 do_repfr,do_repeat,do_repfr,do_join,do_open,do_tog_ai,
-			 do_tab,do_settab,do_tog_tkm,do_blstart,do_blnormend,
-			 do_blrechtend,do_blunmark,do_blweg,do_blcopy,
-			 do_blmove,do_blcut,do_blpaste,do_blindent,do_blread,
-			 do_blwrite,do_goblend,do_goblanf,do_toghbl,do_bltofil,
-			 do_setmarker,do_jumpmarker,do_lastpos,do_hopen,
-			 do_swname,do_newname,do_backtab,do_tog_bak,do_macro,
-			 do_restline,do_shelltog,do_endemit,quitmit,do_delete,
-			 do_togregex, do_matchpar, do_middle, do_saveall,
-			 do_inschar };
+/*****************************************************************************
+*
+*  Funktion       Aktuellen Absatz reformatieren (do_reflow)
+*  --------
+*
+*  Beschreibung : Der bis zur nÑchsten Leerzeile reichende Absatz wird
+*                 reformatiert. Als rechter Rand wird der rechte Fenster-
+*                 rand verwendet. Als linker Rand wird, wenn autoindent
+*                 eingestellt ist, die Spalte der aktuellen Zeile, in der
+*                 das erste Zeichen steht, verwendet. Sonst wird die erste
+*                 Spalte als linker Rand verwendet.
+*
+*****************************************************************************/
+
+void do_reflow()
+{
+  reflow_paragraph();
+  show_win(W_AKT);
+}
+
+void (*funktion [])() = {do_refresh, do_bol, do_eol, do_halfup, do_halfdn,
+			 do_delete, do_backspace, do_home, do_nothome, 
+			 do_insovr, do_textbeginn, do_eot, do_del_word, 
+			 do_wleft, do_wright, do_right, do_left, do_up, 
+			 do_down, do_pgup, do_pgdn, (void (*)()) do_newline, 
+			 do_delline, ueberschreiben, do_schreib_file,quit, 
+			 do_control, do_help, do_movewin, do_sizewin, 
+			 do_swnext, do_swprev, do_swnum, laden, do_win_zu, 
+			 do_goto, do_ende, do_find, do_replace, 
+			 do_underline, do_z_hoch, do_z_runter, do_z_oben, 
+			 do_z_mitte, do_z_unten, do_deleol, do_toggle_size, 
+			 do_repfr, do_repeat, do_repfr, do_join, do_open, 
+			 do_tog_ai, do_tab, do_settab, do_tog_tkm, 
+			 do_blstart, do_blnormend, do_blrechtend, 
+			 do_blunmark, do_blweg, do_blcopy, do_blmove, 
+			 do_blcut, do_blpaste, do_blindent, do_blread, 
+			 do_blwrite, do_goblend, do_goblanf, do_toghbl, 
+			 do_bltofil, do_setmarker, do_jumpmarker, 
+			 do_lastpos, do_hopen, do_swname, do_newname, 
+			 do_backtab, do_tog_bak, do_macro, do_restline, 
+			 do_shelltog, do_endemit,quitmit, do_delete, 
+			 do_togregex, do_matchpar, do_middle, do_saveall, 
+			 do_reflow, do_tog_lb, do_inschar };
 
 /*****************************************************************************
 *

@@ -237,6 +237,7 @@ WINDOW *w;
   char      hgz = FALSE  /* Flag, ob ein Hilfstext angezeigt wurde         */
 #ifdef MOUSE
 	    , mouse_akt=FALSE  /* Flag, ob Maus aktiviert ist */
+	    , macro_active     /* Flag, ob Macro aktiv        */
 #endif
 			    ;
 
@@ -250,7 +251,7 @@ WINDOW *w;
   while(1)
   {
 #ifdef MOUSE
-    if(!mouse_akt && ks_index == -1 && !index) /* Falls kein Macro aktiv ist: */
+    if(!mouse_akt && ks_index == -1 && !index) /* Falls kein Macro aktiv ist */
     { /* und noch kein Zeichen eingelesen wurde */
 #ifdef OS2
       DosReleaseMutexSem (sem_handle);
@@ -348,6 +349,8 @@ WINDOW *w;
 short int newwgetch(w)
 WINDOW *w;
 {
+  short int result;
+
   if(clear_buff) /* Wenn Puffer als zu loeschend markiert sind: */
   {
     while(ks_index > -1)  /* Macro beenden, evtl. freizugebende Strings freigeben */
@@ -358,11 +361,12 @@ WINDOW *w;
     }
     clear_buff = FALSE;  /* Flag zuruecksetzen */
   }
-  while(ks_index != -1)  /* Wenn ein Puffer aktiv, dann aus Puffer lesen */
+  if(ks_index != -1)  /* Wenn ein Puffer aktiv, dann aus Puffer lesen */
   {
-    if(keystack && keystack <= e_keystack)    /* noch Zeichen im Puffer? */
-      return(*keystack++); /* Dann  aktuelles Pufferzeichen zurueckgeben */
-    else       /* Puffer leer */
+    result = *keystack++; /* Dann  aktuelles Pufferzeichen zurueckgeben */
+    /* Alle Zeiger auf n„chstes Pufferzeichen setzen */
+    while (ks_index >= 0 && (!keystack || keystack > e_keystack))
+    {
       if(puff_feld[ks_index].anz_rep) /* War es eine Repeat-Funktion ? */
       {
 	puff_feld[ks_index].anz_rep--;
@@ -380,9 +384,12 @@ WINDOW *w;
 	  e_keystack = puff_feld[ks_index].end;
 	}
       }
+    }
   }
   /* Kein Puffer (mehr) aktiv, von Tastatur lesen */
-  return(wgetch(w));
+  else
+    result = wgetch(w);
+  return result;
 }
 
 

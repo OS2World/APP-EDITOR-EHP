@@ -40,6 +40,7 @@
 /*              - make_akt_win (Fenster zum aktuellen machen)   */
 /*              - sw_name (Fenster gemaess Name suchen)         */
 /*              - push_win_back (Fenster in Hintergrund)        */
+/*              - check_and_scroll_by_one (eine Z. scrollen)    */
 /****************************************************************/
 
 #include "defs.h"
@@ -50,7 +51,7 @@ void clear_stat(), setz_cursor(int), show_win(int),
 extern char *fastzeichen();
 extern char space;
 extern WINDOW *status;
-extern char helpflag,backupflag,highblockflag,def_aiflag;
+extern char helpflag,backupflag,highblockflag,def_aiflag,linebrkflag;
 extern int blockattr,in_block(),def_tab;
 extern short int *cur_to_poi();
 
@@ -69,16 +70,23 @@ static short int anz_win = 0; /* Anzahl geoeffneter Fenster         */
 *                   Bedeutung   : L„nge des rechts am Rand noch sichtbar
 *                                 zu machenden Bereichs
 *
+*  Ergebnis     :
+*                   Typ          : int
+*                   Wertebereich : TRUE, FALSE
+*                   Bedeutung    : TRUE: show_win wurde ausgefhrt
+*                                  FALSE: kein show_win, nur setz_cursor
+*
 *  Beschreibung : ws_col und ws_line werden so angepasst, dass die aktuelle
 *                 Zeile nach Moeglichkeit in der Mitte des Bildschirms steht
 *                 und ein Begriff der L„nge blen noch vor den rechten Rand
 *                 passt. Stand die aktuelle Zeile schon im Fenster, so wird
 *                 sie nicht in der Fenstermitte plaziert, sondern bleibt
-*                 an der aktuellen Position.
+*                 an der aktuellen Position. Das Fenster wird mit show_win
+*                 neu angezeigt, falls ws_col/ws_line ge„ndert wurden.
 *
 *****************************************************************************/
 
-void adapt_screen(blen)
+int adapt_screen(blen)
 int blen;
 {
   /* *** interne Daten und Initialisierung *** */
@@ -90,7 +98,10 @@ int blen;
   && akt_winp->textline < akt_winp->ws_line+akt_winp->dy
   && akt_winp->screencol >= akt_winp->ws_col
   && akt_winp->screencol < akt_winp->ws_col+akt_winp->dx-blen)
+  {
     setz_cursor(W_AKT);
+    return FALSE;
+  }
 
   else  /* Cursor nicht im Fenster oder zu weit rechts */
   {
@@ -103,6 +114,7 @@ int blen;
     if ((akt_winp->ws_col=akt_winp->screencol-akt_winp->dx+blen)<0)
       akt_winp->ws_col = 0;
     show_win(W_AKT); /* Fensterinhalt neu anzeigen */
+    return TRUE;
   }
 }
 
@@ -321,13 +333,13 @@ int modus;
   if (!init)
   {
     init = TRUE;
-    sprintf(kf_template,"%s %%5d%c%s %%5d%c%%s%c%%s%c%%s%c%%s%c%%s",
+    sprintf(kf_template,"%s %%5d%c%s %%5d%c%%s%c%%s%c%%s%c%%s%c%%s%c%%s",
       PROMPT_LINE, BORDER_HOR, PROMPT_COLUMN, BORDER_HOR,
-      BORDER_HOR, BORDER_HOR, BORDER_HOR, BORDER_HOR);
-    sprintf(kl_template,"%c%c%c%c %s %c%c%c%c%%s%c%%s%c%%s%c%%s%c%%s",
+      BORDER_HOR, BORDER_HOR, BORDER_HOR, BORDER_HOR, BORDER_HOR);
+    sprintf(kl_template,"%c%c%c%c %s %c%c%c%c%%s%c%%s%c%%s%c%%s%c%%s%c%%s",
       BORDER_HOR, BORDER_HOR, BORDER_HOR, BORDER_HOR, PROMPT_WINDOWEMP,
       BORDER_HOR, BORDER_HOR, BORDER_HOR, BORDER_HOR, 
-      BORDER_HOR, BORDER_HOR, BORDER_HOR, BORDER_HOR);
+      BORDER_HOR, BORDER_HOR, BORDER_HOR, BORDER_HOR, BORDER_HOR);
     sprintf(f_template,"%c%%d. %s %%s%c%c%%s%c%c%%s",
       BORDER_HOR, PROMPT_WINDOW, BORDER_HOR, BORDER_HOR, BORDER_HOR, 
       BORDER_HOR, BORDER_HOR, BORDER_HOR);
@@ -352,12 +364,14 @@ int modus;
       akt_winp->underflag?PROMPT_UNDERLINE:"",
       akt_winp->autoindflag?"Indent":"",
       akt_winp->shellflag?"SHELL":"",
-      akt_winp->tabflag?"Tabs":"Spcs");
+      akt_winp->tabflag?"Tabs":"Spcs",
+      akt_winp->linebreak?PROMPT_LINEBREAK:"");
     else                        /* Fenster leer */
       sprintf(tbuff,kl_template, akt_winp->insflag?PROMPT_INSERT:
 	PROMPT_OVERWRITE, akt_winp->underflag?PROMPT_UNDERLINE:"", 
 	akt_winp->autoindflag?"Indent":"",
-	akt_winp->shellflag?"SHELL":"", akt_winp->tabflag?"Tabs":"Spcs");
+	akt_winp->shellflag?"SHELL":"", akt_winp->tabflag?"Tabs":"Spcs",
+	akt_winp->linebreak?PROMPT_LINEBREAK:"");
     tbuff[akt_winp->dx] = '\0'; /* Zeile abschneiden, damit sie nicht ueber */
 				/* den Rand hinausgeht. */
     /* Zeile zentriert in erster Fensterzeile anzeigen */
@@ -390,9 +404,10 @@ int modus;
 *  Beschreibung : Das aktuelle Fenster, fuer das schon Speicher alloziert
 *                 sein muss, wird initialisiert : Die (Block-)Koordinaten,
 *                 Cursorposition, Fensterstart und Fenstergroesse werden
-*                 gesetzt<~s Fenster wird durch Curses angelegt, geloescht
-*                 und eingerahmt. Anschliessend wird der Kopf in die oberste
-*                 Zeile und die Fusszeile in die unterste Zeile geschrieben.
+*                 gesetzt, das Fenster wird durch Curses angelegt, der Inhalt
+*                 geloescht und eingerahmt. Anschliessend wird der Kopf in
+*                 die oberste Zeile und die Fusszeile in die unterste Zeile
+*                 geschrieben.
 *
 *****************************************************************************/
 
@@ -409,14 +424,17 @@ void open_window()
   akt_winp->ady = akt_winp->dy = START_HEIGHT-2; /* Fenstergroesse setzen   */
 
   akt_winp->autoindflag = def_aiflag;
-  akt_winp->shellflag = FALSE; /* Default: kein Shellmodus, */
-  akt_winp->underflag = FALSE; /* keine Unterstreichung     */
-  akt_winp->insflag = TRUE;    /* Insert-Mode               */
-  akt_winp->tabflag = TRUE;    /* Blanks zu Tabs kompr.     */
-  akt_winp->tablen = def_tab;  /* Tablaenge setzen          */
+  akt_winp->shellflag = FALSE; /* Default: kein Shellmodus,   */
+  akt_winp->underflag = FALSE; /* keine Unterstreichung       */ 
+  akt_winp->insflag = TRUE;    /* Insert-Mode                 */ 
+  akt_winp->tabflag = TRUE;    /* Blanks zu Tabs kompr.       */ 
+  akt_winp->tablen = def_tab;  /* Tablaenge setzen            */ 
+  akt_winp->linebreak = linebrkflag;
 
   akt_winp->lastline = akt_winp->lastcol = -1; /* letzte Position setzen */
-  akt_winp->block.e_line = akt_winp->block.s_line = -1; /* kein Block */
+  akt_winp->block.e_line = akt_winp->block.s_line =  /* kein Block */
+  akt_winp->block.laenge = -1;
+  akt_winp->block.bstart = (bzeil_typ*) NULL;
   init_win();  /* Curses-Defaults fuer Fenster setzen */
   show_win(W_AKT);  /* Fensterinhalt anzeigen */
 }
@@ -470,6 +488,8 @@ int nfr_win()
 *                 ziert.  Das neue Element wird dann in die Windowliste hinter
 *                 akt_winp eingehaengt.  Das neue Fenster wird anschliessend
 *                 zum aktuellen Fenster.
+*                 Achtung: Es wird keine Initialisierung der Struktur
+*                 vorgenommen.
 *
 *****************************************************************************/
 
@@ -485,6 +505,8 @@ int koppel_win()
   {
     anz_win++; /* Ein Fenster mehr geoeffnet */
     hilf = (win_typ*) reserve_mem (sizeof (win_typ));
+    hilf->winp = (WINDOW*) NULL; /* Damit z.B. print_err erkennt, daá */
+				 /* noch kein curses-Fenster zugeordnet ist */
     hilf->next = akt_winp->next; /* Fenster hinter aktuellem */
     hilf->prev = akt_winp; /* Fenster in Liste einhaengen    */
     akt_winp->next = hilf;
@@ -1517,3 +1539,32 @@ void push_win_back()
   }
 }
 
+/******************************************************************************
+*
+* Funktion     : Um eine Zeile scrollen, falls n”tig (check_and_scroll_by_one)
+* --------------
+*
+*  Ergebnis     :
+*                   Typ          : int
+*                   Wertebereich : TRUE, FALSE
+*                   Bedeutung    : TRUE  : Fenster gescrollt
+*                                  FALSE : Fenster nicht gescrollt
+*
+* Beschreibung : Wenn sich der Cursor unterhalb des sichtbaren Bereichs
+*                des aktuellen Fensters befindet, wird das Fenster um eine
+*                Zeile nach oben gescrollt und der Cursor wieder korrekt
+*                positioniert (mit setz_cursor()).
+*
+******************************************************************************/
+
+int check_and_scroll_by_one ()
+{
+  if (akt_winp->textline >= akt_winp->ws_line+akt_winp->dy)
+  {
+    akt_winp->ws_line++;
+    text_up (0);             /* Falls n”tig, scrollen */
+    setz_cursor (W_AKT);
+    return TRUE;
+  }
+  return FALSE;
+}

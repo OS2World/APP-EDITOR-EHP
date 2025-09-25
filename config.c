@@ -22,6 +22,7 @@ extern win_typ *akt_winp;
 extern marker_typ marker[];
 extern puff_typ macro[];
 
+void write_config();
 int wc_errflag = FALSE;  /* Zeigt an, ob beim Lesen oder Schreiben */
 			 /* der Config-Datei ein Fehler auftrat    */
 
@@ -64,6 +65,7 @@ char *b;
     close (f);
     if(unlink(conffile) < 0)
       pe_or(PROMPT_ERRDELETE);
+    write_config(); /* Wenigstens versuchen, was bisher gelesen wurde zu retten */
     ende(1, TRUE);  /* da noch nichts gemacht wurde, muss auch nichts gespeichert */
   }                 /* werden */
 }
@@ -214,6 +216,7 @@ int argc;
 	old_next = akt_winp->next; /* Verzeigerung merken */
 	old_prev = akt_winp->prev;
 	save_read(fh,akt_winp,sizeof(win_typ)); /* Fensterdaten einlesen */
+	akt_winp->block.bstart = (bzeil_typ*) NULL; /* Blockzeiger l”schen */
 	akt_winp->next = old_next; /* Verzeigerung wieder korrigieren    */
 	akt_winp->prev = old_prev;
 	akt_winp->filename = reserve_mem((namelen = (int)akt_winp->filename)+1);

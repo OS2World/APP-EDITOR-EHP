@@ -386,7 +386,7 @@ void del_rechteck()
      Beachte: count ist n”tig, da das Kriterium textline<=bl_eline
 	      nicht ausreicht, wenn Block sich bis in letzte Zeile
 	      erstreckt. */
-  count = bl->e_line - akt_winp->textline;
+  count = bl->e_line - bl->s_line;
   for(gotox(bl->s_line); count-- >= 0; down())
     shrink_line(bl->s_col,bl->e_col);
   akt_winp->changeflag = TRUE;  /* Text als geaendert markieren */
@@ -658,7 +658,9 @@ bzeil_typ *save_normal()
 *  Beschreibung : Der in der mit bl->bstart beginnenden Liste abgespeicherte
 *                 Block wird an der aktuellen Position eingefuegt, wenn dazu
 *                 genuegend Platz ist. Der eingefuegte Block wird
-*                 anschliessend zum aktuellen.
+*                 anschliessend zum aktuellen. Die Koordinaten werden gesetzt.
+*                 Bei bl muá laenge und bstart korrekt besetzt sein. Die
+*                 Koordinaten sind belanglos.
 *                 Die in den Text eingefuegten Textpointer der Blockzeilen
 *                 werden in der Blockstruktur auf NULL gesetzt, damit sie
 *                 nicht von block_free freigegeben werden.
@@ -820,6 +822,9 @@ block_typ *bl;
 *                 Block wird an der aktuellen Position eingefuegt, wenn dazu
 *                 genuegend Platz ist. Der eingefuegte Block wird
 *                 anschliessend zum aktuellen.
+*                 bl->s_col, bl->e_col, bl->laenge und bl->bstart mssen
+*                 korrekt gesetzt sein. Die Position des eingefgten Blocks
+*                 wird in bl->?_{col|line} eingetragen.
 *
 *****************************************************************************/
 
@@ -1009,6 +1014,7 @@ register int weite;
   akt_winp->alinep = old_ap;    /* Cursorposition restaurieren */
   akt_winp->textline = old_tl;
   akt_winp->screencol = old_sc;
+  akt_winp->changeflag = TRUE;
 
   if (ib & B_LINE) /* Falls Cursor in Blockzeile steht, X-Position anpassen */
   {

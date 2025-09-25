@@ -219,6 +219,7 @@ int laden()
   if (koppel_win())             /* Neues Fenster in Fensterliste einhaengen */
   {                             /* Falls das klappt, Speicherplatz fuer File- */
     akt_winp->filename = save_text (name); /* namen holen und merken */
+    akt_winp->block.bstart = (bzeil_typ*) NULL;
     if (!lies_file())           /* Datei einlesen */
     {                           /* klappt das nicht, neu eingehaengtes Fenster */
       gb_win_frei();            /* wieder auskoppeln */
@@ -723,6 +724,9 @@ void do_matchpar()
     {                               /* anpassen.                          */
       akt_winp->screencol = old_sc; /* Falls nicht gefunden, Cursor wieder*/
       akt_winp->textline  = old_tl; /* an die Stelle von vor dem Aufruf   */
+      beep ();
     }
   }
+  else
+     beep();
 }

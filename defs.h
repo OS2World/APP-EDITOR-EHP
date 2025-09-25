@@ -8,9 +8,16 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 
+/* Note, that the following definitions are to change for UNIX, too */
+#ifdef OS2
+#define EHP_INT_LEN 32
+#else
+#define EHP_INT_LEN 16
+#endif
+
 #define sname(x) (strrchr((x),'\\')?strrchr((x),'\\')+1:x)
 
-#define MAX_HEIGHT (LINES-1) /* Eine Zeile mua fÅr Statusfenster freibleiben */
+#define MAX_HEIGHT (LINES-1) /* Eine Zeile mu· fÅr Statusfenster freibleiben */
 #define MAX_WIDTH (COLS)  
 
 #define START_HEIGHT MAX_HEIGHT /* Anfangsgroessen eines Fensters */
@@ -19,11 +26,13 @@
 #define START_Y 0
 
 #ifndef OWN_CURSES
+/* commented out for testing with Linux (au)
 #define A_BLINK     _STANDOUT
 #define A_BOLD      _STANDOUT
 #define A_STANDOUT  _STANDOUT
 #define A_UNDERLINE _STANDOUT
 #define nodelay(window, b)
+*/
 #endif
 #define BORDER_HOR  'ƒ'
 #define BORDER_VER  '≥'
@@ -42,10 +51,10 @@
 #define SW_STEP 5               /* Schrittweite fuer grosse Schritte */
 				/* bei size_win und move_win */
 
-#define BUFFSIZE  500           /* Groesse von Textpuffern */
-#define MAXLENGTH 500           /* Maximale Zeilenlaenge */
-#define MAX_ANZ_LINES 2147483647/* Maximale Zeilenanzahl */
-#define ANZ_WIN   2147483647    /* Maximale Fensteranzahl */
+#define BUFFSIZE  1000          /* Groesse von Textpuffern */
+#define MAXLENGTH 1000          /* Maximale Zeilenlaenge */
+#define MAX_ANZ_LINES ((int) (((unsigned) (1<<(EHP_INT_LEN-1)))-1)) /* Maximale Zeilenanzahl */
+#define ANZ_WIN ((int) (((unsigned) (1<<(EHP_INT_LEN-1)))-1))       /* Maximale Fensteranzahl */
 #define INS_BUFF_LEN 3*MAXLENGTH  /* Falls Insert mit unterstrichenen Zeichen */
 
 #define INSERT 1                /* modes fuer fastcharout */
@@ -231,12 +240,14 @@
 #define PROMPT_FILTINSRT "Filterausgabe konnte nicht eingefuegt werden!"
 #define PROMPT_SHELINSRT "Konnte Shell-Ausgabe nicht einfuegen!"
 #define PROMPT_INDNTLONG "Zeile zu lang, konnte nicht einruecken!"
-#define PROMPT_WINNMNFND "Window mit dieser Nummer nicht gefunden !"
+#define PROMPT_WINNMNFND "Window mit dieser Nummer nicht gefunden!"
 #define PROMPT_IO_REDIR  "Ein- und Ausgabe von EHP dÅrfen nicht umgelenkt werden!\n"
+#define PROMPT_ERRINDRFL "Beim Formatieren des Absatzes ist die EinrÅckung zu gro·!"
+#define PROMPT_LINEBREAK "Z.umbrch"
 #else
 #define T_SIZE_ERRTEXT   "Text would grow too long!"
 #define L_SIZE_ERRTEXT   "Line would grow too long!"
-#define B_SIZE_ERRTEXT   "Text od line would grow too long!"
+#define B_SIZE_ERRTEXT   "Text or line would grow too long!"
 #define W_COUNT_ERRTEXT  "No window free, further files are ignored!"
 #define NO_LOAD_ERRTEXT  "Unable to execute load-file!\n"
 #define PROMPT_SEARCH    "Find : "
@@ -333,6 +344,8 @@
 #define PROMPT_INDNTLONG "Line too long, unable to indent!"
 #define PROMPT_WINNMNFND "Window with this number not found!"
 #define PROMPT_IO_REDIR  "In- and output of EHP must not be redirected!\n"
+#define PROMPT_ERRINDRFL "Indentation too big for reflowing this paragraph!"
+#define PROMPT_LINEBREAK "Linebrk"
 #endif
 
 typedef struct s1
@@ -347,6 +360,17 @@ typedef struct s5
   struct s5 *next;
 } bzeil_typ;
 
+/* FÅr block_typ gelten folgende Zusicherungen:
+   - bstart != NULL genau dann wenn es auf eine gÅltige Zeilenliste verweist
+   - laenge ist gueltig, wenn bstart != NULL
+   - Da· ?_{line|col} nicht gesetzt ist, hei·t NICHT, da· sich in bstart
+     kein Block befinden kann (bedenke Backup-Kopie nach Lîschen!)
+   - Wenn bstart != NULL, dann ist typ gÅltig und beschreibt den Typ des
+     dort gespeicherten Blocks. Au·erdem ist s_col und e_col gÅltig (wichtig
+     fÅr rechteckigen Block).
+   - Die Definiertheit von Blockanfang und Blockende kann an den
+     ?_line-Attributen erkannt werden. -1 bedeutet undefiniert.
+*/
 typedef struct s3
 {
   char      typ;
@@ -360,7 +384,8 @@ typedef struct s2
   int       ws_col,ws_line,textline,textcol,screencol,maxline,wini,x,y,dx,dy;
   int       ax,ay,adx,ady,tablen,lastcol,lastline;
   unsigned  short int attribs;
-  char      shellflag,changeflag,insflag,underflag,autoindflag,tabflag,read_only;
+  char      shellflag,changeflag,insflag,underflag,autoindflag,tabflag,
+	    read_only,linebreak;
   block_typ block;
   zeil_typ  *alinep,*dummyp;
   WINDOW    *winp;

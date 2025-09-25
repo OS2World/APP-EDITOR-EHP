@@ -15,6 +15,9 @@
 /*              - flash_word (Wort zum Blinken bringen)         */
 /*              - unflash_word (Wort "entblinken")              */
 /*              - do_replace (Ersetzen ausfuehren)              */
+/*              - find_next_par (n„chste Klammer in Cursorum    */
+/*                gebung finden)                                */
+/*              - search_match_par (passende Klammer finden)    */
 /*                                                              */
 /****************************************************************/
 
@@ -760,13 +763,10 @@ register char *ebegriff;
 register int elen;
 {
   /* *** interne Daten und Initialisierung *** */
-  register int i,                        /* Schleifenzaehler              */
-	       oldi = akt_winp->insflag; /* Zwischenspeicher fuer insflag */
+  register int i;                        /* Schleifenzaehler */
 
-  akt_winp->insflag = FALSE;    /* damit enter_char Zeichen PUTtet */
   for (i=0;i<elen;i++)
-    enter_char(*ebegriff++);
-  akt_winp->insflag = oldi;     /* Insert-Mode restaurieren */
+    enter_char(*ebegriff++, (char*) 0, PUT);
 }
 
 /*****************************************************************************
@@ -925,13 +925,14 @@ void do_replace()
 	  if(ret == 'A')    /* Abbruch? */
 	  {
 	    setz_cursor(W_AKT); /* Highlight aus, aber noch kein refresh */
-	    unflash_word(match_len); 
+	    unflash_word(match_len);
 	    anzahl = -1;    /* Meldung am Ende unterdruecken */
 	    break;
 	  }
-	  akt_winp->screencol+=match_len; /* Suchbegriff skippen */
 	  setz_cursor(W_AKT);             /* Highlight aus */
 	  unflash_word(match_len);
+	  akt_winp->screencol+=match_len; /* Suchbegriff skippen */
+	  setz_cursor(W_AKT);
 	  wrefresh(akt_winp->winp);       /* Fenster refreshen   */
 	  print_stat(PROMPT_SEARCHING);
 	  continue;
